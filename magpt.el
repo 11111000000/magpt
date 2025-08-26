@@ -305,9 +305,144 @@ TEMPLATE — шаблон (строка), DIFF — строка diff.
                  (message "magpt: ошибка в коллбэке: %s" (error-message-string err)))))))
       (message "magpt: запрашиваю LLM для генерации сообщения коммита...")
       (condition-case err
-          (let ((args (append (when magpt-model (list :model magpt-model))
-                              (list :callback callback))))
-            (apply #'gptel-request prompt args))
+          (let ((gptel-model (or magpt-model gptel-model)))
+            (gptel-request prompt :callback callback))
+        (error
+         (message "magpt: ошибка при вызове gptel: %s" (error-message-string err)))))))
+
+(defun magpt--insert-into-commit-buffer-target (buf text)
+  "Вставить TEXT в заданный буфер BUF сообщения коммита (git-commit-mode).
+Возвращает t, если вставка произведена; nil иначе."
+  (when (and (buffer-live-p buf))
+    (with-current-buffer buf
+      (when (derived-mode-p 'git-commit-mode)
+        (let* ((raw (buffer-substring-no-properties (point-min) (point-max)))
+               (content (string-trim (replace-regexp-in-string "^#.*$" "" raw))))
+          (when (or (string-empty-p content)
+                    (y-or-n-p "Очистить буфер коммита и вставить сгенерированное сообщение? "))
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert (string-trim-right text) "\n")
+              (goto-char (point-min)))
+            (message "magpt: сообщение коммита вставлено в %s" (buffer-name buf))
+            t))))))
+
+;;;###autoload
+(defun magpt-commit-staged ()
+  "Начать коммит Magit и вставить сгенерированное сообщение для застейдженных изменений.
+Откроет буфер сообщения коммита (git-commit-mode), подставит текст, а завершить
+коммит пользователь сможет стандартной командой C-c C-c. Сам коммит эта команда
+не выполняет.
+
+Требует установленного Magit."
+  (interactive)
+  (unless (magpt--executable-git)
+    (user-error "Не найден исполняемый файл 'git' в PATH"))
+  (unless (and (require 'magit nil t) (fboundp 'magit-commit-create))
+    (user-error "Для magpt-commit-staged требуется Magit"))
+  (let* ((root (magpt--project-root))
+         (diff (magpt--staged-diff root)))
+    (when (string-empty-p (string-trim diff))
+      (user-error "Нет застейдженных изменений (git add ...)"))
+    (let* ((trunc (magpt--maybe-truncate diff magpt-max-diff-bytes))
+           (diff (car trunc))
+           (truncatedp (cdr trunc))
+           (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp))
+           target-buf)
+      ;; Открыть буфер сообщения коммита для застейдженных изменений.
+      (condition-case err
+          (progn
+            (magit-commit-create nil)
+            ;; Попробовать взять текущий буфер, если это commit-msg.
+            (setq target-buf (if (derived-mode-p 'git-commit-mode)
+                                 (current-buffer)
+                               (magpt--find-commit-buffer))))
+        (error
+         (user-error "Не удалось открыть буфер коммита Magit: %s" (error-message-string err))))
+      (message "magpt: запрашиваю LLM для генерации сообщения коммита...")
+      (let ((callback
+             (lambda (response info)
+               (condition-case err
+                   (let ((errstr (plist-get info :error)))
+                     (if errstr
+                         (message "magpt/gptel ошибка: %s" errstr)
+                       (let ((text (string-trim (or response ""))))
+                         (if (string-empty-p text)
+                             (message "magpt: пустой ответ от модели")
+                           (or (and target-buf
+                                    (magpt--insert-into-commit-buffer-target target-buf text))
+                               (magpt--insert-into-commit-buffer text)
+                               (progn
+                                 (magpt--show-in-output-buffer text)
+                                 nil))))))
+
+                 (error
+                  (message "magpt: ошибка в коллбэке: %s" (error-message-string err)))))))
+        (condition-case err
+            (let ((gptel-model (or magpt-model gptel-model)))
+              (gptel-request prompt :callback callback))
+          (error
+           (message "magpt: ошибка при вызове gptel: %s" (error-message-string err))))))))
+
+(defun magpt--commit-callback (response info)
+  "Коллбэк для gptel. Вставляет ответ в буфер коммита, переданный через :context.
+Если буфер закрыт/недоступен к моменту ответа — показать результат в *magpt-commit*."
+  (condition-case err
+      (let* ((errstr (plist-get info :error))
+             (commit-buf (plist-get info :context)))
+        (if errstr
+            (message "magpt/gptel ошибка: %s" errstr)
+          (let ((text (string-trim (or response ""))))
+            (cond
+             ((string-empty-p text)
+              (message "magpt: пустой ответ от модели"))
+             ((and (buffer-live-p commit-buf)
+                   (with-current-buffer commit-buf
+                     (derived-mode-p 'git-commit-mode))
+                   (magpt--insert-into-commit-buffer-target commit-buf text))
+              (message "magpt: сообщение вставлено в буфер коммита"))
+             (t
+              (magpt--show-in-output-buffer text)
+              (message "magpt: буфер коммита недоступен — результат показан в *magpt-commit*"))))))
+    (error
+     (message "magpt: ошибка в коллбэке: %s" (error-message-string err)))))
+
+;;;###autoload
+(defun magpt-commit-staged ()
+  "Начать коммит Magit и вставить сгенерированное сообщение для застейдженных изменений.
+Откроет буфер сообщения коммита (git-commit-mode), подставит текст, а завершить
+коммит пользователь сможет стандартной командой C-c C-c. Сам коммит эта команда
+не выполняет.
+
+Требует установленного Magit."
+  (interactive)
+  (unless (magpt--executable-git)
+    (user-error "Не найден исполняемый файл 'git' в PATH"))
+  (unless (and (require 'magit nil t) (fboundp 'magit-commit-create))
+    (user-error "Для magpt-commit-staged требуется Magit"))
+  (let* ((root (magpt--project-root))
+         (diff (magpt--staged-diff root)))
+    (when (string-empty-p (string-trim diff))
+      (user-error "Нет застейдженных изменений (git add ...)"))
+    (let* ((trunc (magpt--maybe-truncate diff magpt-max-diff-bytes))
+           (diff (car trunc))
+           (truncatedp (cdr trunc))
+           (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp))
+           (target-buf nil))
+      ;; Открыть буфер сообщения коммита и запомнить его.
+      (condition-case err
+          (progn
+            (magit-commit-create nil)
+            (setq target-buf
+                  (if (derived-mode-p 'git-commit-mode)
+                      (current-buffer)
+                    (magpt--find-commit-buffer))))
+        (error
+         (user-error "Не удалось открыть буфер коммита Magit: %s" (error-message-string err))))
+      (message "magpt: запрашиваю LLM для генерации сообщения коммита...")
+      (condition-case err
+          (let ((gptel-model (or magpt-model gptel-model)))
+            (gptel-request prompt :context target-buf :callback #'magpt--commit-callback))
         (error
          (message "magpt: ошибка при вызове gptel: %s" (error-message-string err)))))))
 

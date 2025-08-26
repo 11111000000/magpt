@@ -248,19 +248,58 @@ TEMPLATE — шаблон (строка), DIFF — строка diff.
         (throw 'found buf)))
     nil))
 
+(defcustom magpt-commit-overlay-text "Message generation..."
+  "Текст оверлея, показываемого в буфере коммита пока идёт генерация."
+  :type 'string
+  :group 'magpt)
+
+(defface magpt-commit-overlay-face
+  '((t :inherit font-lock-comment-delimiter-face :weight bold))
+  "Лицо для оверлея генерации сообщения коммита."
+  :group 'magpt)
+
+(defvar-local magpt--commit-overlay nil
+  "Оверлей, показываемый в буфере коммита на время генерации сообщения.")
+
+(defun magpt--show-commit-overlay (buf)
+  "Показать оверлей в буфере BUF, сигнализирующий о генерации сообщения."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (unless (overlayp magpt--commit-overlay)
+          (setq magpt--commit-overlay (make-overlay (point-min) (point-min) buf t t)))
+        (overlay-put magpt--commit-overlay 'before-string
+                     (propertize (concat magpt-commit-overlay-text "\n")
+                                 'face 'magpt-commit-overlay-face))))))
+
+(defun magpt--remove-commit-overlay (buf)
+  "Удалить оверлей в буфере BUF, если он есть."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when (overlayp magpt--commit-overlay)
+        (delete-overlay magpt--commit-overlay)
+        (setq magpt--commit-overlay nil)))))
+
 (defun magpt--insert-into-commit-buffer (text)
   "Вставить TEXT в буфер сообщения коммита, спросив подтверждение при необходимости.
-Возвращает t, если вставка произведена; nil иначе."
+Сохраняет строки-комментарии (начинающиеся с #) внизу буфера. Вставляет
+сгенерированное сообщение в начало. Возвращает t, если вставка произведена; nil иначе."
   (let ((target (or (and (magpt--commit-buffer-p) (current-buffer))
                     (magpt--find-commit-buffer))))
     (when target
       (with-current-buffer target
-        (let* ((raw (buffer-substring-no-properties (point-min) (point-max)))
-               (content (string-trim (replace-regexp-in-string "^#.*$" "" raw))))
-          (when (or (string-empty-p content)
-                    (y-or-n-p "Очистить буфер коммита и вставить сгенерированное сообщение? "))
+        (let* ((comment-pos (save-excursion
+                              (goto-char (point-min))
+                              (when (re-search-forward "^#.*$" nil t)
+                                (match-beginning 0))))
+               (msg-end (or comment-pos (point-max)))
+               (existing (string-trim (buffer-substring-no-properties (point-min) msg-end))))
+          (when (or (string-empty-p existing)
+                    (y-or-n-p "Заменить текущее сообщение и вставить сгенерированное? "))
             (let ((inhibit-read-only t))
-              (erase-buffer)
+              ;; Удаляем только текущее сообщение (до комментариев), комментарии сохраняем.
+              (delete-region (point-min) msg-end)
+              (goto-char (point-min))
               (insert (string-trim-right text) "\n")
               (goto-char (point-min)))
             (message "magpt: сообщение коммита вставлено в %s" (buffer-name target))
@@ -325,22 +364,27 @@ TEMPLATE — шаблон (строка), DIFF — строка diff.
 
 (defun magpt--insert-into-commit-buffer-target (buf text)
   "Вставить TEXT в заданный буфер BUF сообщения коммита.
-Возвращает t, если вставка произведена; nil иначе."
+Сохраняет строки-комментарии (начинающиеся с #) внизу буфера. Вставляет
+сгенерированное сообщение в начало. Возвращает t, если вставка произведена; nil иначе."
   (when (and (buffer-live-p buf))
     (with-current-buffer buf
       (when (magpt--commit-buffer-p)
-        (let* ((raw (buffer-substring-no-properties (point-min) (point-max)))
-               (content (string-trim (replace-regexp-in-string "^#.*$" "" raw))))
-          (when (or (string-empty-p content)
-                    (y-or-n-p "Очистить буфер коммита и вставить сгенерированное сообщение? "))
+        (let* ((comment-pos (save-excursion
+                              (goto-char (point-min))
+                              (when (re-search-forward "^#.*$" nil t)
+                                (match-beginning 0))))
+               (msg-end (or comment-pos (point-max)))
+               (existing (string-trim (buffer-substring-no-properties (point-min) msg-end))))
+          (when (or (string-empty-p existing)
+                    (y-or-n-p "Заменить текущее сообщение и вставить сгенерированное? "))
             (let ((inhibit-read-only t))
-              (erase-buffer)
+              ;; Удаляем только текущее сообщение (до комментариев), комментарии сохраняем.
+              (delete-region (point-min) msg-end)
+              (goto-char (point-min))
               (insert (string-trim-right text) "\n")
               (goto-char (point-min)))
             (message "magpt: сообщение коммита вставлено в %s" (buffer-name buf))
             t))))))
-
-
 
 (defun magpt--commit-callback (response info)
   "Коллбэк для gptel. Вставляет ответ в буфер коммита.
@@ -355,15 +399,25 @@ TEMPLATE — шаблон (строка), DIFF — строка diff.
                               commit-buf)
                          (magpt--find-commit-buffer))))
         (if errstr
-            (message "magpt/gptel ошибка: %s" errstr)
+            (progn
+              (when (buffer-live-p commit-buf)
+                (magpt--remove-commit-overlay commit-buf))
+              (message "magpt/gptel ошибка: %s" errstr))
           (let ((text (string-trim (or response ""))))
             (cond
              ((string-empty-p text)
+              (when (buffer-live-p target)
+                (magpt--remove-commit-overlay target))
               (message "magpt: пустой ответ от модели"))
-             ((and target
-                   (magpt--insert-into-commit-buffer-target target text))
-              (message "magpt: сообщение вставлено в буфер коммита"))
+             (target
+              ;; Убираем оверлей перед вставкой.
+              (magpt--remove-commit-overlay target)
+              (if (magpt--insert-into-commit-buffer-target target text)
+                  (message "magpt: сообщение вставлено в буфер коммита")
+                (message "magpt: вставка отменена пользователем")))
              (t
+              (when (buffer-live-p commit-buf)
+                (magpt--remove-commit-overlay commit-buf))
               (message "magpt: буфер коммита недоступен; сгенерированное сообщение:\n%s" text))))))
     (error
      (message "magpt: ошибка в коллбэке: %s" (error-message-string err)))))
@@ -403,11 +457,16 @@ TEMPLATE — шаблон (строка), DIFF — строка diff.
                 (setq tries (1+ tries)))))
         (error
          (user-error "Не удалось открыть буфер коммита Magit: %s" (error-message-string err))))
+      ;; Показать оверлей «Message generation…» в буфере коммита на время запроса.
+      (when target-buf
+        (magpt--show-commit-overlay target-buf))
       (message "magpt: запрашиваю LLM для генерации сообщения коммита...")
       (condition-case err
           (let ((gptel-model (or magpt-model gptel-model)))
             (gptel-request prompt :context target-buf :callback #'magpt--commit-callback))
         (error
+         (when target-buf
+           (magpt--remove-commit-overlay target-buf))
          (message "magpt: ошибка при вызове gptel: %s" (error-message-string err)))))))
 
 (provide 'magpt)

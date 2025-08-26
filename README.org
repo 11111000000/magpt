@@ -1,1 +1,115 @@
 * MaGPT 0.1.0
+
+** magpt.el — AI Commit Messages for Git in Emacs
+
+MaGPT (magpt.el) is an Emacs package for automatic generation of high-quality commit messages based on the diff of staged changes in your Git project. It uses LLMs via [gptel](https://github.com/karthink/gptel), with tight integration for [Magit](https://magit.vc/), but works reliably even without Magit.
+
+** Features
+
+- Generate clear, well-formatted commit messages from staged changes.
+- Uses [gptel](https://github.com/karthink/gptel) to access local or remote LLMs (OpenAI, Ollama, etc).
+- Optional Magit integration; also works with bare Git, VC, or project.el.
+- User-customizable prompt, model selection, diff size limits, and commit message buffer handling.
+- Overlays "Message generation..." in commit buffer while in progress.
+- Preserves buffer comments and structure; inserts commit message at the top, so that you just need <kbd>C-c C-c</kbd> to finish the commit.
+
+** Installation
+
+Put `magpt.el` somewhere in your `load-path` or install via Quelpa/Melpa/straight.
+
+Add to your config:
+
+#+begin_src emacs-lisp
+(require 'magpt)
+#+end_src
+
+Requires:
+- Emacs 28.1+
+- [gptel](https://github.com/karthink/gptel) (API configuration required for your LLM provider)
+- [Magit](https://magit.vc/) (optional, but enables best UX)
+
+** Quickstart
+
+1. Stage your changes as usual (`git add ...` or via Magit).
+2. Open a commit buffer (`magit-commit` / `C` in Magit, or plain Git).
+3. Run:
+
+   #+begin_src emacs-lisp
+   M-x magpt-generate-commit-message
+   #+end_src
+
+   Or, if using Magit and want to both open and fill commit buffer:
+
+   #+begin_src emacs-lisp
+   M-x magpt-commit-staged
+   #+end_src
+
+4. Wait a few seconds ("Message generation..." appears as overlay).
+5. The generated commit message will be inserted at the top of the buffer (existing comments preserved). Just review, edit if needed, and <kbd>C-c C-c</kbd> to commit!
+
+** Usage Details
+
+- **magpt-generate-commit-message**: Fills current (or any open) commit message buffer based on staged diff, or shows result in `*Messages*` if the buffer is closed.
+- **magpt-commit-staged**: Opens a Magit commit buffer and automatically fills it using the AI-generated message.
+
+If no commit message buffer is open, the message will be shown in the `*Messages*` buffer.
+
+** Customization
+
+All options are grouped under `M-x customize-group RET magpt RET`:
+
+- `magpt-model`: Specify the LLM model to use, or leave nil to use gptel default (e.g., `gpt-4o-mini`, `gpt-3.5-turbo`, etc).
+- `magpt-commit-prompt`: The system prompt used for the LLM (default is optimized for Conventional Commits).
+- `magpt-max-diff-bytes`: Limit on diff size sent to LLM (default 200000 bytes, nil = no limit).
+- `magpt-project-root-strategy`: How to find the Git repo root (prefer Magit, VC, or project).
+- `magpt-diff-args`: Extra command-line args for `git diff` (default: staged + no color).
+- `magpt-commit-overlay-text`: Overlay shown while waiting for message generation.
+
+** How It Works
+
+1. **Diff Extraction**: Collects the staged diff for your current repository/project.
+2. **Prompting**: Builds a prompt (customizable) including the diff, and sends it to the LLM via gptel.
+3. **Insertion**: Inserts the resulting message at the top of your commit message buffer (does not overwrite comments or instructions).
+4. **User Flow**: You review, hit <kbd>C-c C-c</kbd>, and the commit is complete.
+
+** Clean Architecture Principles
+
+- Internal functions are side-effect free ("pure") where possible.
+- All buffer/window/UI effects are restricted to dedicated wrapper functions and interactive commands.
+- Magit is optional but used if available. Otherwise, works with VC or project.el.
+- Thoughtful handling of edge cases: missing staged diff, missing repo, large diff truncation, etc.
+
+** Example Prompt (Default)
+
+#+begin_example
+You are an assistant that writes high-quality Git commit messages.
+Requirements:
+- Use Conventional Commits types when applicable (feat, fix, docs, refactor, test, chore, perf, build, ci).
+- First line: concise summary <= 72 chars.
+- Optional body: wrap at ~72 chars per line; explain motivation, context, and impact.
+- Use imperative mood; do not include ticket/issue references unless present in diff.
+- If the diff is empty or unclear, say 'chore: update' with a brief rationale.
+Provide the final commit message only, no extra commentary.
+#+end_example
+
+** Troubleshooting
+
+- "No Git repository found": Make sure you're in a Git project folder.
+- "No staged changes": Stage your changes with `git add ...` or in Magit.
+- "Commit message buffer not found": Run inside an open commit buffer or use Magit's commit interface.
+- "Message generation... stuck or failed": See `*Messages*` buffer for error output; check gptel backend is running/configured.
+
+** License
+
+MIT
+
+** Author
+
+Peter <11111000000@email.com>
+
+** Links
+
+- [GitHub – magpt](https://github.com/11111000000/magpt)
+- [gptel](https://github.com/karthink/gptel) (dependency)
+- [Magit](https://magit.vc/) (optional dependency)
+

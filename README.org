@@ -101,7 +101,24 @@ Provide the final commit message only, no extra commentary.
 
 ** License
 
-MIT
+This project is licensed under the MIT License.  
+See the file [[file:LICENSE][LICENSE]] in the repository for full text.
+
+** Packaging & MELPA
+
+This package conforms to Emacs packaging conventions and can be installed:
+
+- From source: Place `magpt.el` in your `load-path` and `(require 'magpt)`.
+- With [quelpa](https://github.com/quelpa/quelpa), [straight.el](https://github.com/raxod502/straight.el), or similar tools.
+- Via MELPA (once accepted): Add MELPA to your `package-archives` and install with `M-x package-install RET magpt RET`.
+
+MELPA recipe for this package (for maintainers/contributors):
+
+#+begin_example
+magpt
+:repo "11111000000/magpt"
+:fetcher github
+#+end_example
 
 ** Author
 

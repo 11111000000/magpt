@@ -330,7 +330,10 @@ Behavior:
   (interactive)
   (unless (magpt--executable-git)
     (user-error "Could not find executable 'git' in PATH"))
-  (let* ((root (magpt--project-root))
+  (let* ((target (when magpt-insert-into-commit-buffer
+                   (or (and (magpt--commit-buffer-p) (current-buffer))
+                       (magpt--find-commit-buffer))))
+         (root (magpt--project-root))
          (diff (magpt--staged-diff root)))
     (when (string-empty-p (string-trim diff))
       (user-error "No staged changes found (git add ...)"))
@@ -341,26 +344,31 @@ Behavior:
            (callback
             (lambda (response info)
               (condition-case err
-                  (let ((errstr (plist-get info :error)))
-                    (if errstr
-                        (message "magpt/gptel error: %s" errstr)
-                      (let ((text (string-trim (or response ""))))
-                        (if (string-empty-p text)
-                            (message "magpt: empty response from model")
-                          (if (and magpt-insert-into-commit-buffer
-                                   (magpt--insert-into-commit-buffer text))
-                              (message "magpt: commit message inserted")
-                            (message "magpt: commit message buffer not found, result copied to Messages")
-                            (magpt--show-in-output-buffer text))))))
-
+                  (progn
+                    (when target (magpt--remove-commit-overlay target))
+                    (let ((errstr (plist-get info :error)))
+                      (if errstr
+                          (message "magpt/gptel error: %s" errstr)
+                        (let ((text (string-trim (or response ""))))
+                          (if (string-empty-p text)
+                              (message "magpt: empty response from model")
+                            (if (and magpt-insert-into-commit-buffer
+                                     (magpt--insert-into-commit-buffer text))
+                                (message "magpt: commit message inserted")
+                              (magpt--show-in-output-buffer text)))))))
                 (error
+                 (when target (magpt--remove-commit-overlay target))
                  (message "magpt: error in callback: %s" (error-message-string err)))))))
+      (when target (magpt--show-commit-overlay target))
       (message "magpt: requesting LLM to generate commit message...")
       (condition-case err
           (let ((gptel-model (or magpt-model gptel-model)))
             (gptel-request prompt :callback callback))
         (error
+         (when target (magpt--remove-commit-overlay target))
          (message "magpt: error calling gptel: %s" (error-message-string err)))))))
+
+
 
 (defun magpt--insert-into-commit-buffer-target (buf text)
   "Insert TEXT into the specified commit message buffer BUF.
@@ -431,43 +439,56 @@ actually perform the commit.
 
 Requires Magit to be installed."
   (interactive)
+  ;; Если команда вызвана из transient-меню Magit, сперва аккуратно его закрываем,
+  ;; чтобы post/pre-command хуки transient не падали на nil prefix.
+  (when (and (featurep 'transient)
+             (boundp 'transient--prefix)
+             (bound-and-true-p transient--prefix)
+             (fboundp 'transient-quit-all))
+    (transient-quit-all))
+  ;; Основную работу выполняем на следующем тике, вне контекста transient.
+  (run-at-time 0 nil #'magpt--commit-staged-run))
+
+(defun magpt--commit-staged-run ()
+  "Implementation helper for `magpt-commit-staged' that actually performs the work."
   (unless (magpt--executable-git)
     (user-error "Could not find executable 'git' in PATH"))
   (unless (and (require 'magit nil t) (fboundp 'magit-commit-create))
     (user-error "magpt-commit-staged requires Magit"))
   (let* ((root (magpt--project-root))
          (diff (magpt--staged-diff root)))
-    (when (string-empty-p (string-trim diff))
-      (user-error "No staged changes found (git add ...)"))
-    (let* ((trunc (magpt--maybe-truncate diff magpt-max-diff-bytes))
-           (diff (car trunc))
-           (truncatedp (cdr trunc))
-           (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp))
-           (target-buf nil))
-      ;; Open the commit buffer and wait briefly for it to appear and become active.
-      (condition-case err
-          (progn
-            (magit-commit-create nil)
-            ;; Wait a little to ensure the buffer appears and is current.
-            (let ((tries 0))
-              (while (and (null target-buf) (< tries 50))
-                (setq target-buf (or (and (magpt--commit-buffer-p) (current-buffer))
-                                     (magpt--find-commit-buffer)))
-                (unless target-buf (sit-for 0.01))
-                (setq tries (1+ tries)))))
-        (error
-         (user-error "Could not open Magit commit buffer: %s" (error-message-string err))))
-      ;; Show "Message generation..." overlay in the commit buffer while waiting for LLM.
-      (when target-buf
-        (magpt--show-commit-overlay target-buf))
-      (message "magpt: requesting LLM to generate commit message...")
-      (condition-case err
-          (let ((gptel-model (or magpt-model gptel-model)))
-            (gptel-request prompt :context target-buf :callback #'magpt--commit-callback))
-        (error
-         (when target-buf
-           (magpt--remove-commit-overlay target-buf))
-         (message "magpt: error calling gptel: %s" (error-message-string err)))))))
+    (if (string-empty-p (string-trim diff))
+        (message "magpt: No staged changes found (git add ...)")
+      (let* ((trunc (magpt--maybe-truncate diff magpt-max-diff-bytes))
+             (diff (car trunc))
+             (truncatedp (cdr trunc))
+             (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp))
+             (target-buf nil))
+        ;; Открываем commit-буфер Magit и ждём, пока он появится.
+        (condition-case err
+            (progn
+              (magit-commit-create '())
+              ;; Подождать немного, чтобы буфер появился и стал текущим.
+              (let ((tries 0))
+                (while (and (null target-buf) (< tries 50))
+                  (setq target-buf (or (and (magpt--commit-buffer-p) (current-buffer))
+                                       (magpt--find-commit-buffer)))
+                  (unless target-buf (sit-for 0.01))
+                  (setq tries (1+ tries)))))
+          (error
+           (message "magpt: could not open Magit commit buffer: %s" (error-message-string err))))
+        ;; Если буфер не открылся, тихо выходим (без бросания ошибки внутри transient-контекста).
+        (if (not (and target-buf (buffer-live-p target-buf)))
+            (message "magpt: Magit did not open a commit buffer (possibly canceled or aborted). Aborting message generation.")
+          ;; Показываем overlay и отправляем запрос в LLM.
+          (magpt--show-commit-overlay target-buf)
+          (message "magpt: requesting LLM to generate commit message...")
+          (condition-case err
+              (let ((gptel-model (or magpt-model gptel-model)))
+                (gptel-request prompt :context target-buf :callback #'magpt--commit-callback))
+            (error
+             (magpt--remove-commit-overlay target-buf)
+             (message "magpt: error calling gptel: %s" (error-message-string err)))))))))
 
 (provide 'magpt)
 

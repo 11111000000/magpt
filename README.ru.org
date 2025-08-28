@@ -2,51 +2,10 @@
 :GPTEL_MODEL: gpt-5
 :GPTEL_BACKEND: AI Tunnel
 :GPTEL_SYSTEM: Ты — ИИ, живущий в Emacs под NIXOS. Отвечай в виде Org-mode. Любые списки представляй заголовками и пунктами Org.
-:GPTEL_BOUNDS: ((response (321 4096) (4114 18935)))
+:GPTEL_BOUNDS: ((response (235 15057)))
 :END:
-Переведи документацию на русский. Выдай полный текст
 
-
-
-#+begin_reasoning
-**Translating documentation to Russian*
-
-I need to translate the documentation into Russian, including multiple files. The user asked for the full text and classified everything in “documentation,” which likely includes README.org, magpt-analyse.org content, and commentary blocks in magpt.el. However, code doesn’t need translation, just comments. While the typical ask focuses on README, the term “документацию” suggests a broader scope. So, I’ll be translating the necessary content while avoiding non-documentation sections.*Translating README.org to Russian*
-
-I see that providing the full code with translated comments would be a lot, and it wasn’t asked explicitly. The user mentioned "Переведи документацию на русский," likely targeting README.org. Since the initial prompt includes its entire content, I think the best route is to provide a complete Russian version. I’ll translate the prose while preserving the structure and code blocks, including sections like "Example Scenario." I’ll also make sure to present everything in Org-mode and keep the relevant metadata properties in Russian too.*Deciding on README translation*
-
-I’m considering the translation request, and it seems likely that I only need to translate the README file since "документацию" feels ambiguous. The magpt-analyse.org document is mostly in Russian, so it shouldn't need translation. The user asked for the "полный текст," which I interpret as the full README content. I’ll handle it in Org-mode with headings and bullet lists, translating sections like "Vision," "Features," and "Installation" while keeping code blocks unchanged. I’ll also maintain any inline code formatting as necessary.*Preparing for README translation*
-
-The instructions say to format lists as headings and bullet points, which works for me. The README uses bullet lists and paragraphs, so I'll keep that structure. I’m set to craft the Russian translation, including everything from the README org within triple backticks. I will maintain the title in Russian and ensure the description property is translated too. I'll adjust anchor links to Russian while keeping their tags intact. The "Links" section will stay as well, and the Org-mode format will fit nicely. Let’s get started!*Producing translated content*
-
-I’m ready to translate and create the content I need. The main title will be “MaGPT — Универсальный, безопасный AI‑помощник для Git/Magit в Emacs,” and I’ll include the description property too. I plan to translate each section as follows: 
-
-- Vision -> Видение
-- Features -> Возможности
-- Principles -> Принципы
-- Installation -> Установка
-- Quickstart -> Быстрый старт
-- Example Scenario -> Пример сценария: спокойная точность, полная прозрачность
-- Commands -> Команды
-- Customization -> Настройка
-- Provider setup -> Настройка провайдера (через gptel)
-- Per-project configuration -> Настройка для проекта: .magptrc
-- Magpt Panel -> Панель magpt: Прозрачность процесса
-- Security and Privacy -> Безопасность и конфиденциальность
-- Extending MaGPT -> Расширение MaGPT
-- Task Examples -> Примеры задач (текущие и планируемые)
-- Roadmap & Release Plan -> Дорожная карта и план релизов
-- Test Practices -> Практики тестирования
-- Tips -> Советы
-- Troubleshooting -> Устранение неполадок
-- License -> Лицензия
-- Links -> Ссылки
-- Future Plans: Philosophy of Improvement -> Будущие планы: философия улучшений
-
-I'll also translate the English line at the end, maintain all code blocks as is, and ensure anchor links like [[#future-roadmap][Будущая дорожная карта]] remain the same. I need to mention the planned MELPA support too and keep shortcuts like "M-x" and "C-c C-c" unchanged. I’ll keep all bullet lists and formatting simple with "-" for lists and "*”, "*", etc., for headings. Let’s get writing!
-#+end_reasoning
-
-/ MaGPT — Универсальный, безопасный AI‑помощник для Git/Magit в Emacs
+* MaGPT — Универсальный, безопасный AI‑помощник для Git/Magit в Emacs
 :PROPERTIES:
 :DESCRIPTION: Модульный и расширяемый AI‑помощник для Git в Emacs. Независим от провайдера, безопасность прежде всего, спроектирован для качества рабочего процесса и эволюционного развития. Работает через gptel.
 :END:
@@ -281,4 +240,3 @@ I'll also translate the English line at the end, maintain all code blocks as is,
 
 - С MaGPT вы сохраняете всю силу и ясность Magit — AI помогает только там, где экономит ваше время, никогда не жертвуя безопасностью или контролем. Каждый шаг подтверждается, а вся магия аккуратно и открыто демистифицирована. Приятного, ровного перехода!
 
-*** 

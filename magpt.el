@@ -1,111 +1,83 @@
-;;; magpt.el --- Generate commit messages from staged diff via gptel + Magit  -*- lexical-binding: t; -*-
+;;; magpt.el --- MaGPT: Git/Magit AI assistant via gptel  -*- lexical-binding: t; -*-
 
 ;; Author: Peter <11111000000@email.com>
 ;; URL: https://github.com/11111000000/magpt
-;; Version: 1.2.0
+;; Version: 1.2.1
 ;; Package-Requires: ((emacs "28.1") (gptel "0.9"))
 ;; Keywords: tools, vc, git, ai
 
 ;;; Commentary:
 ;;
-;; magpt is an Emacs package that helps write commit messages
-;; based on the diff of staged changes using gptel (LLM providers)
-;; and integrates with Magit when available.
+;; MaGPT (magpt.el) is an Emacs package that augments your Git/Magit workflow
+;; with AI-powered assistance via gptel. It started as an AI commit message
+;; generator and is evolving towards a safe, task-oriented assistant that can:
+;; - observe repository state and explain it,
+;; - suggest next actions and commit structure,
+;; - assist with messages, summaries, and release notes,
+;; - provide reversible, preview-first help for complex flows (e.g., conflicts).
 ;;
-;; Main features:
-;; - Get the diff of all staged changes in the current Git project.
-;; - Build a prompt (=magpt-commit-prompt' + diff).
-;; - Send an asynchronous request to an LLM via =gptel-request'.
-;; - Insert the result into the commit message buffer (git-commit-mode)
-;;   or show it in a separate buffer.
+;; Design principles:
+;; - Provider-agnostic: inherit configuration from gptel; no hardcoding of models.
+;; - Safety first: explicit confirmation before sending data; minimal context; masking-ready.
+;; - Reversibility: never mutate without preview and confirmation; no hidden Git side-effects.
+;; - Clear UX: async and non-blocking; overlays show progress; errors clean up gracefully.
+;; - Extensible core: “Task” registry (context → prompt → request → render/apply) for future features.
 ;;
-;; Architectural notes:
-;; - Internal functions (with the magpt-- prefix) strive to be pure: they
-;;   take arguments and return values without side effects.
-;; - Side effects (buffer/window/message operations) occur only
-;;   in interactive commands and callbacks.
-;; - Magit is an optional dependency; if available, it's used for
-;;   determining the repo root. There are fallbacks to vc/project.el.
-;;
-;; Usage:
-;; - Call the command:
-;;     M-x magpt-generate-commit-message
-;; - Customize variables in the =magpt' group if needed.
+;; This file is organized into well-delimited sections to support future splitting
+;; into multiple modules (core, commit, tasks, ui, etc.) without changing behavior.
+;; All public entry points and user-facing behavior remain backward-compatible.
 
 ;;; Code:
 
-(require 'gptel)
-(require 'vc)
-(require 'project)
-(require 'seq)
+;;;; Section: Dependencies and forward declarations
+;;
+;; We keep core deps lightweight. Magit/transient are optional. gptel is required for requests.
+
 (require 'cl-lib)
 (require 'subr-x)
+(require 'seq)
 (require 'json)
-(require 'magit nil t) ;; опционально
+(require 'vc)
+(require 'project)
+(require 'gptel)
+(require 'magit nil t)     ;; Optional; used when available
+(require 'transient nil t) ;; Optional; used when available
 
-;; Simple passthrough wrapper to keep a single call site
-(defun magpt--gptel-request (prompt &rest args)
-  "Call `gptel-request' with PROMPT and ARGS.
-Wrap callback safely and add diagnostic logging."
-  (let* ((plist args)
-         (cb (plist-get plist :callback))
-         (stream (plist-get plist :stream)))
-    (when magpt-log-enabled
-      (magpt--log "gptel-request: model=%S stream=%S prompt-len=%d preview=%s"
-                  (or magpt-model gptel-model)
-                  stream
-                  (length (or prompt ""))
-                  (let* ((p (or prompt "")) (n (min 180 (length p))))
-                    (substring p 0 n))))
-    (when cb
-      (setq plist (plist-put plist :callback (magpt--safe-callback cb))))
-    (apply #'gptel-request prompt plist)))
+(declare-function magit-toplevel "ext:magit")
+(declare-function magit-commit-create "ext:magit")
+(declare-function transient-quit-all "ext:transient")
+(defvar transient--prefix) ;; from transient
 
-(defun magpt--safe-callback (cb)
-  "Wrap CB so that any error is caught and reported safely (with diagnostics)."
-  (lambda (resp info)
-    (when magpt-log-enabled
-      (let* ((ty (type-of resp))
-             (preview (condition-case _
-                          (let* ((s (magpt--response->string resp))
-                                 (n (min 180 (length s))))
-                            (substring s 0 n))
-                        (error "<unprintable>"))))
-        (magpt--log "safe-callback: resp-type=%S preview=%s info=%S"
-                    ty preview (and (listp info) (cl-subseq info 0 (min 10 (length info)))))))
-    (condition-case err
-        (funcall cb resp info)
-      (error
-       (magpt--log "callback exception: %s\nBT:\n%s"
-                   (error-message-string err) (magpt--backtrace-string))
-       (message "%s" (magpt--i18n 'callback-error (error-message-string err)))))))
+;;;; Section: Feature flags and “public” groups
+;;
+;; All user options live under the magpt group. The module is provider-agnostic and safe by default.
 
 (defgroup magpt nil
-  "Generate commit messages from staged diff using gptel."
+  "MaGPT: Git/Magit AI assistant via gptel (commit messages and assist tasks)."
   :group 'tools
   :group 'vc
   :prefix "magpt-")
 
+;;;; Section: Customization — core options
+;;
+;; These options control models, prompts, size limits, UX, and repo discovery.
+
 (defcustom magpt-model nil
-  "Name of the LLM model for gptel, or nil.
-If nil, uses the default model/provider configured in gptel.
-Example: \"gpt-4o-mini\" or any other model available in your gptel setup."
+  "LLM model name for gptel. If nil, uses gptel’s currently-selected default."
   :type '(choice (const :tag "Use gptel default model" nil)
-                 (string :tag "Explicitly specify a model"))
+                 (string :tag "Explicit model name"))
   :group 'magpt)
 
 (defcustom magpt-info-language "English"
-  "Preferred natural language for informational content produced by the model in assist tasks.
-Examples: status summaries, rationales, and risk lists. This does not translate Emacs UI strings,
-it only nudges the model via prompts to use this language for textual fields."
+  "Preferred natural language for informative content (summaries, rationales) in assist tasks.
+Note: This does not translate Emacs UI; it only nudges the model via prompts."
   :type 'string
   :group 'magpt)
 
 (defcustom magpt-commit-language nil
-  "Preferred natural language for generated commit messages.
-When non-nil, magpt will instruct the model to produce commit messages in this language."
+  "Preferred language for generated commit messages. If nil, no preference."
   :type '(choice (const :tag "No preference" nil)
-                 (string :tag "Language name"))
+                 (string :tag "Language"))
   :group 'magpt)
 
 (defcustom magpt-commit-prompt
@@ -117,30 +89,28 @@ Requirements:
 - Use imperative mood; do not include ticket/issue references unless present in diff.
 - If the diff is empty or unclear, say 'chore: update' with a brief rationale.
 Provide the final commit message only, no extra commentary."
-  "Prompt template, to be appended with the staged diff.
-The final prompt will be this string plus a separator and the diff."
+  "Prompt template for commit message generation. The diff is appended."
   :type 'string
   :group 'magpt)
 
 (defcustom magpt-max-diff-bytes 200000
-  "Maximum size in bytes for the diff included in the request.
-If nil, don't limit. If the diff exceeds this limit, it will be truncated,
-and a truncation notice will be added."
+  "Maximum UTF-8 byte size for the diff sent to the model.
+If nil, no limit. When truncated, boundaries respect UTF-8 and a note is added."
   :type '(choice (const :tag "No limit" nil)
                  (integer :tag "Max bytes"))
   :group 'magpt)
 
 (defcustom magpt-insert-into-commit-buffer t
-  "If t, the result will be inserted into the commit message buffer (git-commit-mode) if available.
-Otherwise, the result will be shown in a separate *magpt-commit* buffer."
+  "If non-nil, insert generated commit messages into the commit buffer when available.
+Otherwise show results in a separate read-only buffer."
   :type 'boolean
   :group 'magpt)
 
 (defcustom magpt-project-root-strategy 'prefer-magit
-  "Strategy to determine the Git project root for getting the diff.
-- prefer-magit: Magit first, then VC, then project.el, then default-directory (with check).
-- prefer-vc: VC first, then Magit, then project.el, then default-directory (with check).
-- prefer-project: project.el first, then Magit, then VC, then default-directory (with check)."
+  "Strategy for determining the Git project root:
+- prefer-magit    : Magit → VC → project.el → default-directory check
+- prefer-vc       : VC → Magit → project.el → default-directory check
+- prefer-project  : project.el → Magit → VC → default-directory check"
   :type '(choice
           (const :tag "Prefer Magit" prefer-magit)
           (const :tag "Prefer VC" prefer-vc)
@@ -148,28 +118,27 @@ Otherwise, the result will be shown in a separate *magpt-commit* buffer."
   :group 'magpt)
 
 (defcustom magpt-diff-args '("--staged" "--no-color")
-  "Additional arguments for the git diff command.
-By default, staged diff without color is used."
+  "Additional arguments used with git diff when collecting staged changes."
   :type '(repeat string)
   :group 'magpt)
 
 (defcustom magpt-confirm-before-send t
-  "If non-nil, ask for confirmation before sending the staged diff to the LLM.
-The prompt shows the size in bytes (and notes if truncation will apply)."
+  "If non-nil, ask for confirmation before sending content to the model."
   :type 'boolean
   :group 'magpt)
 
 (defcustom magpt-send-on-empty-context nil
-  "If non-nil, still send an LLM request when a task's collected context is empty (0 bytes).
-When nil, magpt will skip the network call and record a panel entry instead."
+  "If non-nil, still send an LLM request when a task's context is empty (0 bytes).
+When nil, magpt skips the request and records a panel entry instead."
   :type 'boolean
   :group 'magpt)
 
-;;;; Project rc (.magptrc) support
+;;;; Section: Project RC (.magptrc) support
+;;
+;; Per-project overrides with highest priority. The file format is a safe “alist” of (SYMBOL . VALUE).
 
 (defcustom magpt-rc-file-name ".magptrc"
-  "Per-project RC file name located at the project root.
-If present, its settings override all magpt variables (highest priority)."
+  "Per-project RC file name at the repo root. Overrides user options when present."
   :type 'string
   :group 'magpt)
 
@@ -177,31 +146,28 @@ If present, its settings override all magpt variables (highest priority)."
   "Internal cache of project rc: plist (:path PATH :mtime TIME :data ALIST).")
 
 (defun magpt--locate-rc ()
-  "Return absolute path to project .magptrc if found, else nil."
+  "Return absolute path to project .magptrc if found; otherwise nil."
   (let ((root (ignore-errors (magpt--project-root))))
     (when root
       (let ((f (expand-file-name magpt-rc-file-name root)))
         (when (file-exists-p f) f)))))
 
 (defun magpt--read-rc (file)
-  "Read FILE and return an alist of (SYMBOL . VALUE). Does not eval arbitrary code.
-Supports both ( (var . val) ... ) and '( (var . val) ... ) forms."
+  "Read FILE and return an alist of (SYMBOL . VALUE). Ignores arbitrary code; supports quoted list."
   (condition-case err
       (with-temp-buffer
         (insert-file-contents file)
         (goto-char (point-min))
         (let ((sexp (read (current-buffer))))
-          ;; Strip leading quote if present: '( ... ) -> ( ... )
           (when (and (listp sexp) (eq (car-safe sexp) 'quote))
             (setq sexp (cadr sexp)))
-          (when (and (listp sexp) (consp sexp))
-            sexp)))
+          (when (listp sexp) sexp)))
     (error
      (magpt--log "rc read error: %s: %s" file (error-message-string err))
      nil)))
 
 (defun magpt--apply-rc (alist)
-  "Apply ALIST of (SYMBOL . VALUE) to magpt variables. Highest priority."
+  "Apply ALIST of (SYMBOL . VALUE) to magpt variables. Highest priority overrides."
   (when (listp alist)
     (dolist (kv alist)
       (pcase kv
@@ -216,7 +182,7 @@ Supports both ( (var . val) ... ) and '( (var . val) ... ) forms."
              (set sym v))))))))
 
 (defun magpt--maybe-load-rc ()
-  "Load and apply project .magptrc if present and changed. Overrides user options."
+  "Load and apply project .magptrc if present and changed."
   (let ((f (magpt--locate-rc)))
     (when f
       (let* ((attr (file-attributes f))
@@ -235,10 +201,12 @@ Supports both ( (var . val) ... ) and '( (var . val) ... ) forms."
                                      (t (format "%S" kv))))
                                   (or alist '())))))))))
 
-;;;; logging helpers
+;;;; Section: Logging and diagnostics
+;;
+;; Diagnostics are lightweight and safe. Use magpt-show-log to open the buffer.
 
 (defcustom magpt-log-enabled t
-  "If non-nil, write diagnostic messages into `magpt-log-buffer-name'."
+  "If non-nil, write diagnostic logs to `magpt-log-buffer-name'."
   :type 'boolean
   :group 'magpt)
 
@@ -248,8 +216,7 @@ Supports both ( (var . val) ... ) and '( (var . val) ... ) forms."
   :group 'magpt)
 
 (defun magpt--log (fmt &rest args)
-  "Append a diagnostic line to `magpt-log-buffer-name' and echo minimal info.
-Robust against bad format strings and mismatched args."
+  "Append a diagnostic line to `magpt-log-buffer-name' and echo minimal info."
   (when magpt-log-enabled
     (let ((buf (get-buffer-create magpt-log-buffer-name)))
       (with-current-buffer buf
@@ -274,7 +241,9 @@ Robust against bad format strings and mismatched args."
   (interactive)
   (pop-to-buffer (get-buffer-create magpt-log-buffer-name)))
 
-;;;; i18n helpers
+;;;; Section: i18n helpers (messages for UI and panel)
+;;
+;; i18n is intentionally minimal and only for user-facing messages, not prompts.
 
 (defun magpt--lang-code ()
   "Return language code symbol based on `magpt-info-language'."
@@ -337,33 +306,75 @@ Robust against bad format strings and mismatched args."
 
 (defun magpt--i18n (key &rest args)
   "Format localized message for KEY with ARGS using `magpt-info-language'."
-  ;; Ensure RC is applied (for language) and log selected language.
   (magpt--maybe-load-rc)
   (let* ((lang (magpt--lang-code))
          (tbl (if (eq lang 'ru) magpt--i18n-ru magpt--i18n-en))
          (fmt (or (alist-get key tbl) (alist-get key magpt--i18n-en) "")))
     (magpt--log "i18n: key=%S lang=%S fmt=%s" key lang fmt)
-    (if args
-        (apply #'format fmt args)
-      fmt)))
+    (if args (apply #'format fmt args) fmt)))
+
+;;;; Section: GPT integration wrappers
+;;
+;; We centralize gptel-request usage for logging and callback safety. Streaming is opt-in.
+
+(defcustom magpt-stream-output nil
+  "If non-nil, request streaming from gptel when supported.
+This does not change final insertion semantics."
+  :type 'boolean
+  :group 'magpt)
 
 (defun magpt--response->string (resp)
-  "Return RESP as a string, tolerating non-string structures from backends."
+  "Return RESP as a string, tolerating backend variations."
   (cond
    ((stringp resp) resp)
-   ;; Common alist shape with content
    ((and (listp resp) (assq 'content resp))
     (let ((c (cdr (assq 'content resp))))
       (if (stringp c) c (format "%S" resp))))
-   ;; Try JSON-encode alists/plists/hash-tables
    ((hash-table-p resp)
     (condition-case _ (json-encode resp) (error (format "%S" resp))))
    ((listp resp)
     (condition-case _ (json-encode resp) (error (format "%S" resp))))
    (t (format "%S" resp))))
 
+(defun magpt--safe-callback (cb)
+  "Wrap CB to prevent hard failures; log diagnostics on error."
+  (lambda (resp info)
+    (when magpt-log-enabled
+      (let* ((ty (type-of resp))
+             (preview (condition-case _
+                          (let* ((s (magpt--response->string resp))
+                                 (n (min 180 (length s))))
+                            (substring s 0 n))
+                        (error "<unprintable>"))))
+        (magpt--log "safe-callback: resp-type=%S preview=%s info=%S"
+                    ty preview (and (listp info)
+                                    (ignore-errors
+                                      (cl-subseq info 0 (min 10 (length info))))))))
+    (condition-case err
+        (funcall cb resp info)
+      (error
+       (magpt--log "callback exception: %s\nBT:\n%s"
+                   (error-message-string err) (magpt--backtrace-string))
+       (message "%s" (magpt--i18n 'callback-error (error-message-string err)))))))
+
+(defun magpt--gptel-request (prompt &rest args)
+  "Call `gptel-request' with PROMPT and ARGS, adding logging and safe callback."
+  (let* ((plist args)
+         (cb (plist-get plist :callback))
+         (stream (plist-get plist :stream)))
+    (when magpt-log-enabled
+      (magpt--log "gptel-request: model=%S stream=%S prompt-len=%d preview=%s"
+                  (or magpt-model gptel-model)
+                  stream
+                  (length (or prompt ""))
+                  (let* ((p (or prompt "")) (n (min 180 (length p))))
+                    (substring p 0 n))))
+    (when cb
+      (setq plist (plist-put plist :callback (magpt--safe-callback cb))))
+    (apply #'gptel-request prompt plist)))
+
 (defun magpt--system-prompt (kind)
-  "Return strict system directive for language. KIND is 'commit or 'info."
+  "Return a strict system directive based on language and KIND ('commit or 'info)."
   (let* ((lang (pcase kind
                  ('commit magpt-commit-language)
                  (_      magpt-info-language)))
@@ -371,15 +382,16 @@ Robust against bad format strings and mismatched args."
     (when l
       (format "Answer STRICTLY in %s. Do not use any other language." l))))
 
-;;;; Internal helper functions (pure, no side effects)
+;;;; Section: Git plumbing helpers
+;;
+;; These helpers encapsulate git invocation and project root detection.
 
 (defun magpt--executable-git ()
   "Return the path to the git executable or nil."
   (executable-find "git"))
 
 (defun magpt--process-git (dir &rest args)
-  "Execute git with ARGS in the DIR directory.
-Return cons (EXIT-CODE . STRING-OUTPUT). Doesn't signal errors itself."
+  "Execute git with ARGS in DIR. Return (EXIT-CODE . STRING-OUTPUT)."
   (let ((default-directory (file-name-as-directory (or dir default-directory))))
     (with-temp-buffer
       (let ((exit (apply #'process-file (or (magpt--executable-git) "git")
@@ -388,8 +400,7 @@ Return cons (EXIT-CODE . STRING-OUTPUT). Doesn't signal errors itself."
         (cons exit (if (string-suffix-p "\n" out) (substring out 0 -1) out))))))
 
 (defun magpt--git (dir &rest args)
-  "Execute git ARGS in DIR and return the output string.
-If the command exits non-zero, signal `user-error' with error text."
+  "Execute git ARGS in DIR and return the output string or signal user-error."
   (pcase (apply #'magpt--process-git dir args)
     (`(,exit . ,out)
      (if (zerop exit)
@@ -397,8 +408,7 @@ If the command exits non-zero, signal `user-error' with error text."
        (user-error "Git error (%s): %s" exit out)))))
 
 (defun magpt--git-root-from (dir)
-  "Try to get the Git repo root directory for DIR.
-Return the root path as a string, or nil if not found."
+  "Return the Git repo root directory for DIR, or nil if not found."
   (when (and (magpt--executable-git) (file-directory-p dir))
     (let ((res (magpt--process-git dir "rev-parse" "--show-toplevel")))
       (when (eq (car res) 0)
@@ -427,7 +437,7 @@ Return the root path as a string, or nil if not found."
 
 (defun magpt--project-root ()
   "Determine the Git project root according to `magpt-project-root-strategy'.
-Signal error if no repository is found. Always returns an absolute, normalized directory."
+Signal an error if no repository is found."
   (let* ((candidates
           (pcase magpt-project-root-strategy
             ('prefer-magit
@@ -453,13 +463,20 @@ Signal error if no repository is found. Always returns an absolute, normalized d
     (file-name-as-directory (expand-file-name root-s))))
 
 (defun magpt--staged-diff (root)
-  "Return the diff string for staged changes in ROOT.
-Uses `magpt-diff-args' over 'git diff'."
+  "Return the diff string for staged changes in ROOT."
   (apply #'magpt--git root "diff" (or magpt-diff-args '("--staged" "--no-color"))))
 
+(defun magpt--string-bytes (s)
+  "Return UTF-8 byte size of string S."
+  (if (stringp s) (string-bytes s) 0))
+
+;;;; Section: Size control and prompt building
+;;
+;; We enforce UTF-8-safe truncation and build final prompts with clear markers.
+
 (defun magpt--truncate-to-bytes (s max-bytes)
-  "Return the longest prefix of S whose UTF-8 byte size does not exceed MAX-BYTES.
-Uses binary search on character count to ensure UTF-8 boundary."
+  "Return the longest prefix of S whose UTF-8 size ≤ MAX-BYTES.
+Uses binary search on character count to align with UTF-8 boundaries."
   (let* ((len (length s)))
     (if (or (null max-bytes) (<= (string-bytes s) max-bytes))
         s
@@ -471,24 +488,20 @@ Uses binary search on character count to ensure UTF-8 boundary."
                  (candidate (substring s 0 mid))
                  (bytes (string-bytes candidate)))
             (if (<= bytes max-bytes)
-                (setq best mid
-                      lo mid)
+                (setq best mid lo mid)
               (setq hi (1- mid)))))
         (substring s 0 best)))))
 
 (defun magpt--maybe-truncate (s max-bytes)
-  "Maybe truncate string S to MAX-BYTES bytes.
-Returns cons (TRUNCATED-OR-ORIGINAL . TRUNCATEDP)."
+  "Return cons (TEXT . TRUNCATEDP) where TEXT is S or a truncated prefix."
   (if (or (null max-bytes) (<= (string-bytes s) max-bytes))
       (cons s nil)
     (let ((tstr (magpt--truncate-to-bytes s max-bytes)))
       (cons tstr t))))
 
 (defun magpt--build-commit-prompt (template diff &optional truncatedp)
-  "Build the final prompt for the LLM.
-TEMPLATE is the prompt template (string), DIFF is the diff string.
-If TRUNCATEDP is non-nil, append a note about the truncated diff.
-Respects `magpt-commit-language' by adding a strict directive when non-nil."
+  "Build the final prompt for commit message generation from TEMPLATE and DIFF.
+Appends a language directive when `magpt-commit-language' is non-nil."
   (let* ((tpl (string-trim-right (or template "")))
          (lang (and (stringp magpt-commit-language)
                     (> (length magpt-commit-language) 0)
@@ -504,8 +517,7 @@ Respects `magpt-commit-language' by adding a strict directive when non-nil."
      "\n--- END DIFF ---\n")))
 
 (defun magpt--confirm-send (orig-bytes send-bytes)
-  "Confirm sending the diff given sizes ORIG-BYTES and SEND-BYTES.
-Returns non-nil to proceed."
+  "Ask the user to confirm sending content of SEND-BYTES (showing ORIG-BYTES for context)."
   (if (not magpt-confirm-before-send)
       t
     (let ((msg (if (= orig-bytes send-bytes)
@@ -514,12 +526,12 @@ Returns non-nil to proceed."
       (magpt--log "confirm-send: info-lang=%S msg=%s" magpt-info-language msg)
       (y-or-n-p msg))))
 
+;;;; Section: Commit buffer detection and insertion
+;;
+;; We preserve commit buffer structure and only replace the message part, not comments.
+
 (defun magpt--commit-buffer-p (&optional buf)
-  "Return t if BUF appears to be a commit message buffer.
-Heuristics:
-- major-mode derives from git-commit-mode, or
-- file name is COMMIT_EDITMSG, or
-- with-editor-mode is enabled (editor buffer for commit message)."
+  "Return non-nil if BUF appears to be a commit message buffer."
   (with-current-buffer (or buf (current-buffer))
     (or (derived-mode-p 'git-commit-mode)
         (and buffer-file-name
@@ -528,13 +540,98 @@ Heuristics:
         (bound-and-true-p with-editor-mode))))
 
 (defun magpt--find-commit-buffer ()
-  "Find the active commit message buffer, if any."
+  "Find a live commit message buffer if any."
   (catch 'found
     (dolist (buf (buffer-list))
       (when (and (buffer-live-p buf)
                  (magpt--commit-buffer-p buf))
         (throw 'found buf)))
     nil))
+
+(defun magpt--commit-comment-char ()
+  "Return the comment character used by git-commit, or fallback '#'."
+  (or (and (boundp 'git-commit-comment-char) git-commit-comment-char)
+      (and (boundp 'comment-start)
+           (stringp comment-start)
+           (> (length comment-start) 0)
+           (aref comment-start 0))
+      ?#))
+
+(defun magpt--commit-message-boundaries ()
+  "Return (MSG-END . COMMENTS-BEG) for current commit buffer.
+If a trailing comments block exists (preceded by a blank line), MSG-END is before it.
+Otherwise MSG-END is point-max and COMMENTS-BEG is nil."
+  (save-excursion
+    (goto-char (point-min))
+    (let* ((c (magpt--commit-comment-char))
+           (rx (format "^%c" c))
+           (cand nil)
+           pos)
+      (while (and (not cand)
+                  (setq pos (re-search-forward rx nil t)))
+        (let ((bol (match-beginning 0)))
+          (when (save-excursion
+                  (goto-char bol)
+                  (forward-line -1)
+                  (or (bobp) (looking-at-p "^[ \t]*$")))
+            (let ((ok t))
+              (save-excursion
+                (goto-char bol)
+                (while (and ok (not (eobp)))
+                  (cond
+                   ((looking-at-p rx))
+                   ((looking-at-p "^[ \t]*$"))
+                   (t (setq ok nil)))
+                  (forward-line 1)))
+              (when ok (setq cand bol))))))
+      (if cand
+          (cons cand cand)
+        (cons (point-max) nil)))))
+
+(defun magpt--insert-into-commit-buffer-target (buf text)
+  "Insert TEXT into commit buffer BUF, preserving comment block at the bottom.
+Asks for confirmation if an existing message is present."
+  (when (and (buffer-live-p buf))
+    (with-current-buffer buf
+      (when (magpt--commit-buffer-p)
+        (let* ((bounds (magpt--commit-message-boundaries))
+               (msg-end (car bounds))
+               (existing (string-trim (buffer-substring-no-properties (point-min) msg-end))))
+          (when (or (string-empty-p existing)
+                    (y-or-n-p (magpt--i18n 'replace-current-commit-msg?)))
+            (let ((inhibit-read-only t))
+              (delete-region (point-min) msg-end)
+              (goto-char (point-min))
+              (insert (string-trim-right text) "\n")
+              (goto-char (point-min)))
+            (message "%s" (format (magpt--i18n 'inserted-into-buffer-named) (buffer-name buf)))
+            t))))))
+
+(defun magpt--insert-into-commit-buffer (text)
+  "Insert TEXT into the active commit buffer if available.
+Return non-nil if insertion happened."
+  (let ((target (or (and (magpt--commit-buffer-p) (current-buffer))
+                    (magpt--find-commit-buffer))))
+    (when target
+      (magpt--insert-into-commit-buffer-target target text))))
+
+(defun magpt--show-in-output-buffer (text)
+  "Show TEXT in a read-only buffer and copy to kill-ring."
+  (let ((buf (get-buffer-create "*magpt-commit*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (string-trim-right text) "\n")
+        (goto-char (point-min))
+        (text-mode)
+        (setq buffer-read-only t)))
+    (pop-to-buffer buf)
+    (kill-new (string-trim-right text))
+    (message "%s" (magpt--i18n 'result-copied))))
+
+;;;; Section: Progress overlays and spinner (commit buffer)
+;;
+;; Non-blocking UI feedback while awaiting model responses. Cleans up on all paths.
 
 (defcustom magpt-commit-overlay-text "Message generation..."
   "Overlay text shown in the commit buffer while generation is in progress."
@@ -555,12 +652,6 @@ Heuristics:
   '("⠁" "⠂" "⠄" "⠂")
   "Frames used for the simple spinner animation."
   :type '(repeat string)
-  :group 'magpt)
-
-(defcustom magpt-stream-output nil
-  "If non-nil, request streaming from gptel when supported.
-This is experimental and does not change insertion behavior."
-  :type 'boolean
   :group 'magpt)
 
 (defvar-local magpt--commit-overlay nil
@@ -601,7 +692,7 @@ This is experimental and does not change insertion behavior."
         (setq magpt--overlay-spinner-timer nil)))))
 
 (defun magpt--show-commit-overlay (buf)
-  "Show an overlay in the BUF to indicate commit message generation in progress."
+  "Show an overlay in BUF to indicate commit message generation is in progress."
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -621,91 +712,17 @@ This is experimental and does not change insertion behavior."
         (delete-overlay magpt--commit-overlay)
         (setq magpt--commit-overlay nil)))))
 
-(defun magpt--comment-line-regexp ()
-  "Return a regexp that matches comment lines in a Git commit buffer."
-  (let* ((c (or (and (boundp 'git-commit-comment-char) git-commit-comment-char)
-                (and (boundp 'comment-start)
-                     (stringp comment-start)
-                     (> (length comment-start) 0)
-                     (aref comment-start 0))
-                ?#)))
-    (format "^%c.*$" c)))
-
-(defun magpt--commit-comment-char ()
-  "Return the comment character used by git-commit, or fallback '#'."
-  (or (and (boundp 'git-commit-comment-char) git-commit-comment-char)
-      (and (boundp 'comment-start)
-           (stringp comment-start)
-           (> (length comment-start) 0)
-           (aref comment-start 0))
-      ?#))
-
-(defun magpt--commit-message-boundaries ()
-  "Return a cons (MSG-END . COMMENTS-BEG) for current commit buffer.
-Detects a trailing comments block (preceded by a blank line) that consists only
-of comment lines or blank lines until end of buffer. If found, MSG-END is the
-buffer position before that block; otherwise MSG-END is `point-max'."
-  (save-excursion
-    (goto-char (point-min))
-    (let* ((c (magpt--commit-comment-char))
-           (rx (format "^%c" c))
-           (cand nil)
-           pos)
-      (while (and (not cand)
-                  (setq pos (re-search-forward rx nil t)))
-        (let ((bol (match-beginning 0)))
-          ;; Require a blank line (or BOB) before the comments block candidate.
-          (when (save-excursion
-                  (goto-char bol)
-                  (forward-line -1)
-                  (or (bobp) (looking-at-p "^[ \t]*$")))
-            ;; Verify: from BOL to EOB only comment lines or blanks.
-            (let ((ok t))
-              (save-excursion
-                (goto-char bol)
-                (while (and ok (not (eobp)))
-                  (cond
-                   ((looking-at-p rx))          ; comment line
-                   ((looking-at-p "^[ \t]*$"))  ; blank line
-                   (t (setq ok nil)))
-                  (forward-line 1)))
-              (when ok (setq cand bol))))))
-      (if cand
-          (cons cand cand)
-        (cons (point-max) nil)))))
-
-(defun magpt--insert-into-commit-buffer (text)
-  "Insert TEXT into the commit message buffer, asking for confirmation if needed.
-Preserves comment lines at the bottom. Inserts the generated message at the top.
-Returns t if insertion is performed; nil otherwise."
-  (let ((target (or (and (magpt--commit-buffer-p) (current-buffer))
-                    (magpt--find-commit-buffer))))
-    (when target
-      (magpt--insert-into-commit-buffer-target target text))))
-
-(defun magpt--show-in-output-buffer (text)
-  "Show TEXT in the *magpt-commit* buffer and copy to kill-ring."
-  (let ((buf (get-buffer-create "*magpt-commit*")))
-    (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (string-trim-right text) "\n")
-        (goto-char (point-min))
-        (text-mode)
-        (setq buffer-read-only t)))
-    (pop-to-buffer buf)
-    (kill-new (string-trim-right text))
-    (message "%s" (magpt--i18n 'result-copied))))
-
-;;;; Публичная команда
+;;;; Section: Commit message generation (core public commands)
+;;
+;; Two entry points:
+;; - magpt-generate-commit-message: use inside an existing commit buffer (or show in a buffer).
+;; - magpt-commit-staged          : open a Magit commit buffer and auto-fill.
 
 ;;;###autoload
 (defun magpt-generate-commit-message ()
-  "Generate a commit message from the staged diff of the current project using gptel.
-Behavior:
-- If 'magpt-insert-into-commit-buffer' is t and a git-commit-mode buffer is available,
-  the result will be inserted into that buffer (with confirmation if there is an existing message).
-- Otherwise, the result is displayed in a separate /magpt-commit/ buffer and also copied to the kill-ring."
+  "Generate a commit message from the staged diff using gptel.
+If a commit buffer exists and `magpt-insert-into-commit-buffer' is non-nil,
+insert the result there; otherwise show it in *magpt-commit*."
   (interactive)
   (magpt--maybe-load-rc)
   (unless (magpt--executable-git)
@@ -745,34 +762,8 @@ Behavior:
                (message "%s" (magpt--i18n 'gptel-error (error-message-string err))))))
         (message "%s" (magpt--i18n 'sending-cancelled))))))
 
-
-
-(defun magpt--insert-into-commit-buffer-target (buf text)
-  "Insert TEXT into the specified commit message buffer BUF.
-Preserves comment lines (lines starting with the Git comment char) at the bottom
-Inserts the generated message at the top. Returns t if insertion is performed; nil otherwise."
-  (when (and (buffer-live-p buf))
-    (with-current-buffer buf
-      (when (magpt--commit-buffer-p)
-        (let* ((bounds (magpt--commit-message-boundaries))
-               (msg-end (car bounds))
-               (existing (string-trim (buffer-substring-no-properties (point-min) msg-end))))
-          (when (or (string-empty-p existing)
-                    (y-or-n-p (magpt--i18n 'replace-current-commit-msg?)))
-            (let ((inhibit-read-only t))
-              ;; Only remove the current message (up to comments), keep comments section intact.
-              (delete-region (point-min) msg-end)
-              (goto-char (point-min))
-              (insert (string-trim-right text) "\n")
-              (goto-char (point-min)))
-            (message "%s" (format (magpt--i18n 'inserted-into-buffer-named) (buffer-name buf)))
-            t))))))
-
 (defun magpt--commit-callback (response info)
-  "Callback for gptel. Inserts or displays the generated commit message.
-Prefers inserting into the commit buffer when `magpt-insert-into-commit-buffer' is non-nil
-and a suitable buffer is available (taken from :context or searched via `magpt--find-commit-buffer').
-Otherwise shows the result in *magpt-commit* and copies it to the kill-ring."
+  "Callback for gptel commit generation. Insert or display the result."
   (condition-case err
       (let* ((errstr (plist-get info :error))
              (commit-buf (plist-get info :context))
@@ -808,28 +799,18 @@ Otherwise shows the result in *magpt-commit* and copies it to the kill-ring."
 
 ;;;###autoload
 (defun magpt-commit-staged ()
-  "Start a Magit commit and insert a generated message for staged changes.
-If already in a commit message buffer, reuse the current buffer instead of opening a new one.
-The generated message will be inserted into that buffer even if you switch windows while waiting.
-
-Opens a commit message buffer when needed, inserts the generated text, and allows the user to
-complete the commit with the standard C-c C-c command. This command does not
-actually perform the commit.
-
-Requires Magit to be installed."
+  "Open a Magit commit buffer (if needed) and insert a generated message for staged changes.
+Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
   (interactive)
-  ;; Если команда вызвана из transient-меню Magit, сперва аккуратно его закрываем,
-  ;; чтобы post/pre-command хуки transient не падали на nil prefix.
   (when (and (featurep 'transient)
              (boundp 'transient--prefix)
              (bound-and-true-p transient--prefix)
              (fboundp 'transient-quit-all))
     (transient-quit-all))
-  ;; Основную работу выполняем на следующем тике, вне контекста transient.
   (run-at-time 0 nil #'magpt--commit-staged-run))
 
 (defun magpt--commit-staged-run ()
-  "Implementation helper for `magpt-commit-staged' that actually performs the work."
+  "Implementation for `magpt-commit-staged'."
   (unless (magpt--executable-git)
     (user-error "Could not find executable 'git' in PATH"))
   (magpt--maybe-load-rc)
@@ -847,7 +828,6 @@ Requires Magit to be installed."
              (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp))
              (target-buf (and (magpt--commit-buffer-p) (current-buffer))))
         (if (and target-buf (buffer-live-p target-buf))
-            ;; Уже в commit-буфере: спрашиваем подтверждение, затем показываем overlay и запускаем генерацию.
             (if (magpt--confirm-send orig-bytes send-bytes)
                 (progn
                   (magpt--show-commit-overlay target-buf)
@@ -864,12 +844,10 @@ Requires Magit to be installed."
                      (magpt--remove-commit-overlay target-buf)
                      (message "%s" (magpt--i18n 'gptel-error (error-message-string err))))))
               (message "%s" (magpt--i18n 'sending-cancelled)))
-          ;; Не в буфере коммита: откроем его и отправим по готовности.
           (if (magpt--confirm-send orig-bytes send-bytes)
               (let (hook-fn remove-timer)
                 (setq hook-fn
                       (lambda ()
-                        ;; Одноразовый хук — сразу снимаем по входу в commit-буфер.
                         (when (timerp remove-timer) (cancel-timer remove-timer))
                         (remove-hook 'git-commit-setup-hook hook-fn)
                         (let ((buf (current-buffer)))
@@ -888,7 +866,6 @@ Requires Magit to be installed."
                                (magpt--remove-commit-overlay buf)
                                (message "%s" (magpt--i18n 'gptel-error (error-message-string err)))))))))
                 (add-hook 'git-commit-setup-hook hook-fn)
-                ;; На случай отмены коммита — очистим хук через таймаут.
                 (setq remove-timer
                       (run-at-time 20 nil
                                    (lambda ()
@@ -901,34 +878,38 @@ Requires Magit to be installed."
                    (message "magpt: could not open Magit commit buffer: %s" (error-message-string err)))))
             (message "%s" (magpt--i18n 'sending-cancelled))))))))
 
+;;;; Section: Magit integration minor mode (transient entry)
+;;
+;; Adds a button “[i] Commit with AI message (magpt)” to Magit’s commit transient.
+
 ;;;###autoload
 (define-minor-mode magpt-mode
-  "Global minor mode to integrate MagPT AI commit message generation with Magit.
-When enabled, adds a [i] transient command to the Magit commit popup to use AI-based message suggestion."
+  "Global minor mode: integrate MaGPT with Magit’s commit transient."
   :global t
   :group 'magpt
   (if magpt-mode
-      ;; On enable: Add magpt-commit-staged button to Magit commit transient.
       (with-eval-after-load 'magit
         (transient-append-suffix 'magit-commit "c"
           '("i" "Commit with AI message (magpt)" magpt-commit-staged)))
-    ;; On disable: Remove our binding, if present.
     (with-eval-after-load 'magit
       (transient-remove-suffix 'magit-commit "i"))))
 
-;; Experimental task registry (Phase 0). Behind flags; does not affect 1.0.0 behavior.
+;;;; Section: Task registry (experimental core abstraction)
+;;
+;; A Task encodes a flow: context → prompt → request → render/apply. This is the foundation
+;; for the evolving assistant features beyond commit messages. It is optional and off by default.
 
 (defcustom magpt-enable-task-registry nil
-  "If non-nil, expose experimental task registry commands.
-When disabled, registry APIs remain available but are not bound or invoked."
+  "If non-nil, expose experimental task registry commands (assist tasks, panel)."
   :type 'boolean
   :group 'magpt)
 
+(cl-defstruct (magpt-task (:constructor magpt--task))
+  "Task object holding necessary functions and metadata for execution."
+  name title scope context-fn prompt-fn render-fn apply-fn confirm-send?)
+
 (defvar magpt--tasks (make-hash-table :test 'eq)
   "Registry of magpt tasks keyed by symbol.")
-
-(cl-defstruct (magpt-task (:constructor magpt--task))
-  name title scope context-fn prompt-fn render-fn apply-fn confirm-send?)
 
 (defun magpt--hash-table-keys (ht)
   "Return a list of keys in hash-table HT."
@@ -939,17 +920,15 @@ When disabled, registry APIs remain available but are not bound or invoked."
   (puthash (magpt-task-name task) task magpt--tasks))
 
 (defun magpt--run-task (task &optional ctx)
-  "Run TASK: collect context, build prompt, request model, render/apply.
-CTX is passed to the task's context function. Experimental."
+  "Run TASK: collect context, build prompt, request model, then render/apply."
   (pcase-let* ((`(,data ,_preview ,bytes) (funcall (magpt-task-context-fn task) ctx))
                (prompt (funcall (magpt-task-prompt-fn task) data)))
     (if (and (or (null bytes) (zerop bytes))
              (not magpt-send-on-empty-context))
         (let* ((name (magpt-task-name task))
-               (note "Пустой контекст; запрос к LLM пропущен")
+               (note "Empty context; LLM request skipped")
                (resp (if (eq name 'explain-status)
-                         ;; Детерминированный JSON для чистого статуса — годится для дальнейшего меню.
-                         "{\"summary\":\"Рабочее дерево чистое, индекс пуст.\",\"risks\":[],\"suggestions\":[{\"title\":\"Обновить локальный репозиторий\",\"commands\":[\"git fetch --all\",\"git pull --ff-only\"]},{\"title\":\"Начать новую ветку\",\"commands\":[\"git switch -c feature/initial\"]}]}"
+                         "{\"summary\":\"Working tree clean; index empty.\",\"risks\":[],\"suggestions\":[{\"title\":\"Update local repository\",\"commands\":[\"git fetch --all\",\"git pull --ff-only\"]},{\"title\":\"Start a new branch\",\"commands\":[\"git switch -c feature/initial\"]}]}"
                        "{\"note\":\"empty context; nothing to send\"}")))
           (magpt--log "run-task: %s skipped (empty context)" name)
           (magpt--panel-append-entry name (or prompt "") resp note)
@@ -994,7 +973,6 @@ CTX is passed to the task's context function. Experimental."
      (list (intern (completing-read
                     "magpt task: "
                     (mapcar #'symbol-name (magpt--hash-table-keys magpt--tasks)))))))
-  ;; Ensure tasks are registered when called programmatically too.
   (magpt--maybe-load-rc)
   (when magpt-enable-task-registry
     (magpt--register-assist-tasks))
@@ -1002,10 +980,12 @@ CTX is passed to the task's context function. Experimental."
     (unless task (user-error "Unknown magpt task: %s" name))
     (magpt--run-task task ctx)))
 
-;;;; Phase 1 — Assist (read-only tasks) and panel
+;;;; Section: Panel (read-only history UI for tasks)
+;;
+;; The panel provides a single place to view prompts/responses and quick validity hints.
 
 (defcustom magpt-panel-buffer-name "*magpt-panel*"
-  "Name of the magpt panel buffer that shows task history and results."
+  "Name of the magpt panel buffer showing task history."
   :type 'string
   :group 'magpt)
 
@@ -1015,15 +995,15 @@ CTX is passed to the task's context function. Experimental."
   :group 'magpt)
 
 (defvar magpt--panel-entries nil
-  "List of panel entries. Each entry is a plist:
-  :time STRING, :task SYMBOL, :request STRING, :response STRING,
-  :valid t/nil (for JSON validation), :note STRING (optional).")
+  "List of panel entries (plists):
+  :time STRING :task SYMBOL :request STRING :response STRING
+  :valid t/nil :note STRING (optional).")
 
 (defvar magpt--current-request nil
   "Dynamically bound prompt/request preview for panel rendering.")
 
 (defun magpt--panel-buffer ()
-  "Return the buffer for the magpt panel (create if needed)."
+  "Return the panel buffer, rendering all entries."
   (let ((buf (get-buffer-create magpt-panel-buffer-name)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -1055,15 +1035,14 @@ CTX is passed to the task's context function. Experimental."
 
 ;;;###autoload
 (defun magpt-show-panel ()
-  "Show the magpt panel with history."
+  "Show the magpt panel with task history."
   (interactive)
   (pop-to-buffer (magpt--panel-buffer)))
 
 (defun magpt--panel-append-entry (task request response &optional note)
-  "Append a history entry to panel for TASK with REQUEST and RESPONSE."
+  "Append a history entry to panel for TASK with REQUEST/RESPONSE."
   (let* ((resp (magpt--response->string (or response "")))
-         (looks-like-json (string-match-p "\\`[ \t\n]*[{\\[]"
-                                          resp))
+         (looks-like-json (string-match-p "\\`[ \t\n]*[{\\[]" resp))
          (json-valid
           (and looks-like-json
                (condition-case _err
@@ -1082,23 +1061,21 @@ CTX is passed to the task's context function. Experimental."
     (when magpt-panel-auto-pop
       (magpt-show-panel))))
 
-(defun magpt--string-bytes (s)
-  "Return UTF-8 bytes of string S."
-  (if (stringp s) (string-bytes s) 0))
+;;;; Section: Assist tasks (Phase 1, read-only)
+;;
+;; These tasks are safe: they only observe and suggest; no mutations.
+;; They use the panel to display results and basic validation hints.
 
-;;;; Assist tasks (read-only): explain-status, commit-lint-suggest, branch-name-suggest
-
-;; Common renderer to panel
 (defun magpt--render-to-panel (task out data)
-  "Render OUT and DATA for TASK into the panel buffer (read-only)."
+  "Render OUT/DATA for TASK into the panel (read-only)."
   (ignore data)
   (magpt--panel-append-entry task (or magpt--current-request "") (or out "")))
 
-;; Task: Explain Status
+;; Explain Status
 
 (defun magpt--ctx-status (_ctx)
   "Collect minimal git status for explain-status task.
-Returns (data preview bytes)."
+Return (data preview bytes)."
   (let* ((root (magpt--project-root))
          (porc (magpt--git root "status" "--porcelain"))
          (short (string-join (seq-take (split-string porc "\n" t) 200) "\n"))
@@ -1106,7 +1083,7 @@ Returns (data preview bytes)."
     (list short short bytes)))
 
 (defun magpt--prompt-explain-status (status)
-  "Build prompt for explain-status task. Force output language via `magpt-info-language'."
+  "Build prompt for explain-status task. Use `magpt-info-language' for textual fields."
   (format (concat
            "You are a senior developer. Review the current Git status and propose next safe actions.\n"
            "Return ONLY JSON with fields:\n"
@@ -1122,11 +1099,11 @@ Returns (data preview bytes)."
   (magpt--panel-append-entry 'explain-status (or magpt--current-request "") (or json "")
                              "JSON schema: {summary, risks[], suggestions[].commands[]}"))
 
-;; Task: Commit Lint/Fix Suggest (read-only)
+;; Commit Lint/Fix Suggest
 
 (defun magpt--ctx-commit-lint (_ctx)
   "Collect current commit message (top section only) and staged diff.
-Returns (data preview bytes)."
+Return (data preview bytes)."
   (let* ((buf (or (and (magpt--commit-buffer-p) (current-buffer))
                   (magpt--find-commit-buffer))))
     (unless buf
@@ -1146,8 +1123,8 @@ Returns (data preview bytes)."
           (list (list :message msg :diff diff) preview bytes))))))
 
 (defun magpt--prompt-commit-lint (data)
-  "Build prompt for commit lint task using DATA plist (:message :diff).
-Respects `magpt-commit-language' for suggestion.message and `magpt-info-language' for explanatory text."
+  "Build prompt for commit lint task using DATA (:message :diff).
+Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' for issues[]."
   (let* ((msg (plist-get data :message))
          (diff (plist-get data :diff))
          (lang-lines
@@ -1180,10 +1157,10 @@ Respects `magpt-commit-language' for suggestion.message and `magpt-info-language
   (magpt--panel-append-entry 'commit-lint-suggest (or magpt--current-request "") (or json "")
                              "JSON schema: {status, issues[], suggestion{replace,message}}"))
 
-;; Task: Branch Name Suggest (read-only)
+;; Branch Name Suggest
 
 (defun magpt--ctx-branch-name (_ctx)
-  "Collect brief context for branch name suggestion: porcelain status."
+  "Collect brief context for branch name suggestion: porcelain status paths."
   (let* ((root (magpt--project-root))
          (porc (magpt--git root "status" "--porcelain"))
          (paths (mapcar (lambda (l) (string-trim (substring l 3)))
@@ -1194,13 +1171,12 @@ Respects `magpt-commit-language' for suggestion.message and `magpt-info-language
     (list (list :paths paths) preview bytes)))
 
 (defun magpt--prompt-branch-name (data)
-  "Build prompt for branch-name-suggest task using DATA (:paths).
-Hints the model to use `magpt-info-language' for rationale."
+  "Build prompt for branch-name-suggest task using DATA (:paths)."
   (let ((paths (plist-get data :paths))
         (ilang (or magpt-info-language "English")))
     (format (concat
              "Propose a safe Git branch name in kebab-case for the current work.\n"
-             "Base it on the changed paths/themes. Constraints:\n"
+             "Constraints:\n"
              "- lowercase, kebab-case, <= 40 chars, [a-z0-9-] only, no trailing dash.\n"
              "- Prefer intent over specifics; no secrets.\n"
              "Use %s for textual fields like rationale. Answer strictly in this language.\n"
@@ -1216,10 +1192,8 @@ Hints the model to use `magpt-info-language' for rationale."
   (magpt--panel-append-entry 'branch-name-suggest (or magpt--current-request "") (or json "")
                              "JSON schema: {name, alternatives[], rationale}"))
 
-;; Registration / wrappers
-
 (defvar magpt--assist-tasks-registered nil
-  "Non-nil when Phase 1 assist tasks have been registered.")
+  "Non-nil when assist tasks have been registered in the registry.")
 
 (defun magpt--register-assist-tasks ()
   "Register Phase 1 assist tasks into the registry (read-only tasks)."

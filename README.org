@@ -1,83 +1,127 @@
-* MaGPT 0.1.0
+* MaGPT 1.0.0
+:PROPERTIES:
+:DESCRIPTION: AI commit messages for Git in Emacs via gptel, with optional Magit integration.
+:END:
 
 ** magpt.el — AI Commit Messages for Git in Emacs
 
-MaGPT (magpt.el) is an Emacs package for automatic generation of high-quality commit messages based on the diff of staged changes in your Git project. It uses LLMs via [gptel](https://github.com/karthink/gptel), with tight integration for [Magit](https://magit.vc/), but works reliably even without Magit.
+MaGPT (magpt.el) is an Emacs package that generates high‑quality Git commit messages from the diff of your staged changes. It talks to LLMs via gptel and integrates nicely with Magit, while remaining usable with plain Git/VC/project.el.
+
+- Provider‑agnostic: no hardcoded model; inherits your gptel default by default.
+- Safe defaults: confirmation before sending diffs, transparent truncation, comments preserved.
+- Smooth UX: overlay while generating; inserts at the top of commit buffer; async and non-blocking.
 
 ** Features
 
-- Generate clear, well-formatted commit messages from staged changes.
-- Uses [gptel](https://github.com/karthink/gptel) to access local or remote LLMs (OpenAI, Ollama, etc).
-- Optional Magit integration; also works with bare Git, VC, or project.el.
-- User-customizable prompt, model selection, diff size limits, and commit message buffer handling.
-- Overlays "Message generation..." in commit buffer while in progress.
-- Preserves buffer comments and structure; inserts commit message at the top, so that you just need <kbd>C-c C-c</kbd> to finish the commit.
+- Generate clear, Conventional‑Commit‑friendly messages from your staged diff.
+- Uses gptel to access local or remote LLMs (OpenAI, Ollama, etc).
+- Optional Magit integration: open commit buffer and autofill in one command.
+- Provider/model agnostic (defaults to gptel’s current model; can be customized).
+- Preserves git‑commit comments and structure; inserts message at the top only.
+- Accurate comment detection using git-commit-mode’s configured comment char.
+- Diff truncation by UTF‑8 bytes with correctness guarantees.
+- Confirmation prompt shows original/sent byte sizes before uploading the diff.
+- Async requests with a visible overlay (“Message generation...”) and clean teardown on errors.
+
+** Requirements
+
+- Emacs 28.1+
+- gptel 0.9+ (backend/provider configuration required)
+- Magit (optional, recommended for best UX)
 
 ** Installation
 
-Put `magpt.el` somewhere in your `load-path` or install via Quelpa/Melpa/straight.
-
-Add to your config:
+Clone or place magpt.el into your load-path and require it:
 
 #+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/magpt/")
 (require 'magpt)
 #+end_src
 
-Requires:
-- Emacs 28.1+
-- [gptel](https://github.com/karthink/gptel) (API configuration required for your LLM provider)
-- [Magit](https://magit.vc/) (optional, but enables best UX)
+With use-package (straight.el example):
+
+#+begin_src emacs-lisp
+(straight-use-package '(magpt :type git :host github :repo "11111000000/magpt"))
+(use-package magpt
+  :after gptel
+  :commands (magpt-generate-commit-message magpt-commit-staged)
+  :init
+  ;; Optional: integrate with Magit transient (adds "i" in magit-commit popup)
+  (magpt-mode 1))
+#+end_src
+
+MELPA (once accepted) will allow the usual M-x package-install flow.
 
 ** Quickstart
 
-1. Stage your changes as usual (`git add ...` or via Magit).
-2. Open a commit buffer (`magit-commit` / `C` in Magit, or plain Git).
-3. Run:
+1. Stage your changes (git add ... or via Magit).
+2. Open a commit buffer (Magit: C then c; or start a normal Git commit).
+3. Generate:
+   - In a commit buffer: M-x magpt-generate-commit-message
+   - Or open+fill in one go with Magit: M-x magpt-commit-staged
+4. Confirm sending the diff when prompted (shows bytes; notes truncation if any).
+5. Review the inserted message at the top of the commit buffer, tweak if needed, then C-c C-c.
 
-   #+begin_src emacs-lisp
-   M-x magpt-generate-commit-message
-   #+end_src
+If no commit buffer is available or insertion is disabled, the result appears in a read-only buffer named *magpt-commit* and is copied to your kill-ring.
 
-   Or, if using Magit and want to both open and fill commit buffer:
+** Commands
 
-   #+begin_src emacs-lisp
-   M-x magpt-commit-staged
-   #+end_src
-
-4. Wait a few seconds ("Message generation..." appears as overlay).
-5. The generated commit message will be inserted at the top of the buffer (existing comments preserved). Just review, edit if needed, and <kbd>C-c C-c</kbd> to commit!
-
-** Usage Details
-
-- **magpt-generate-commit-message**: Fills current (or any open) commit message buffer based on staged diff, or shows result in `*Messages*` if the buffer is closed.
-- **magpt-commit-staged**: Opens a Magit commit buffer and automatically fills it using the AI-generated message.
-
-If no commit message buffer is open, the message will be shown in the `*Messages*` buffer.
+- magpt-generate-commit-message
+  - Generate a message from the staged diff and insert it into an existing commit buffer (or show in *magpt-commit*).
+- magpt-commit-staged
+  - Requires Magit. Opens a commit buffer and generates/inserts the message automatically.
+- magpt-mode (global minor mode)
+  - When enabled, adds an “[i] Commit with AI message (magpt)” entry to Magit’s commit transient.
 
 ** Customization
 
-All options are grouped under `M-x customize-group RET magpt RET`:
+All options live under M-x customize-group RET magpt RET.
 
-- `magpt-model`: Specify the LLM model to use, or leave nil to use gptel default (e.g., `gpt-4o-mini`, `gpt-3.5-turbo`, etc).
-- `magpt-commit-prompt`: The system prompt used for the LLM (default is optimized for Conventional Commits).
-- `magpt-max-diff-bytes`: Limit on diff size sent to LLM (default 200000 bytes, nil = no limit).
-- `magpt-project-root-strategy`: How to find the Git repo root (prefer Magit, VC, or project).
-- `magpt-diff-args`: Extra command-line args for `git diff` (default: staged + no color).
-- `magpt-commit-overlay-text`: Overlay shown while waiting for message generation.
+- magpt-model (default: nil)
+  - LLM model name for gptel. When nil, uses gptel’s current default model/provider.
+- magpt-commit-prompt
+  - Prompt template appended with the diff; tuned for Conventional Commits.
+- magpt-max-diff-bytes (default: 200000)
+  - Max bytes of diff to include; nil disables limit. Truncation respects UTF‑8 boundaries.
+- magpt-insert-into-commit-buffer (default: t)
+  - If t and a commit buffer exists, insert there; otherwise show in *magpt-commit*.
+- magpt-project-root-strategy (default: prefer-magit)
+  - How to find the repo root: prefer-magit | prefer-vc | prefer-project.
+- magpt-diff-args (default: '("--staged" "--no-color"))
+  - Extra args for git diff when building the staged diff.
+- magpt-confirm-before-send (default: t)
+  - Ask for confirmation before sending the diff; shows original/sent sizes, mentions truncation.
+- magpt-commit-overlay-text (default: "Message generation...")
+  - Text shown as an overlay during async generation.
+
+Faces:
+- magpt-commit-overlay-face
+  - Face for the overlay line in the commit buffer.
+
+Example configuration:
+
+#+begin_src emacs-lisp
+(customize-set-variable 'magpt-model nil) ;; inherit from gptel
+(customize-set-variable 'magpt-max-diff-bytes 200000)
+(customize-set-variable 'magpt-confirm-before-send t)
+(customize-set-variable 'magpt-project-root-strategy 'prefer-magit)
+#+end_src
 
 ** How It Works
 
-1. **Diff Extraction**: Collects the staged diff for your current repository/project.
-2. **Prompting**: Builds a prompt (customizable) including the diff, and sends it to the LLM via gptel.
-3. **Insertion**: Inserts the resulting message at the top of your commit message buffer (does not overwrite comments or instructions).
-4. **User Flow**: You review, hit <kbd>C-c C-c</kbd>, and the commit is complete.
-
-** Clean Architecture Principles
-
-- Internal functions are side-effect free ("pure") where possible.
-- All buffer/window/UI effects are restricted to dedicated wrapper functions and interactive commands.
-- Magit is optional but used if available. Otherwise, works with VC or project.el.
-- Thoughtful handling of edge cases: missing staged diff, missing repo, large diff truncation, etc.
+1. Diff extraction
+   - Finds the repo root via Magit/VC/project.el fallbacks.
+   - Retrieves the staged diff (git diff --staged --no-color plus custom args).
+2. Size control
+   - Optionally truncates the diff by UTF‑8 bytes (binary search; safe boundaries).
+   - Confirmation prompt indicates original vs sent sizes.
+3. Prompting
+   - Builds a prompt from your template + BEGIN/END DIFF markers (notes truncation).
+   - Sends async via gptel, with the commit buffer set as context to manage overlay lifecycle.
+4. Insertion
+   - If a commit buffer is available and insertion is enabled, inserts at the top only.
+   - Preserves the bottom “comments” section accurately using git-commit-mode’s comment char and section detection.
+   - Otherwise, shows the result in *magpt-commit* and copies it to the kill-ring.
 
 ** Example Prompt (Default)
 
@@ -92,41 +136,65 @@ Requirements:
 Provide the final commit message only, no extra commentary.
 #+end_example
 
+** Provider setup (gptel)
+
+Configure gptel for your provider (sketch):
+
+- OpenAI-compatible:
+  #+begin_src emacs-lisp
+  (setq gptel-api-key (getenv "OPENAI_API_KEY"))
+  ;; Optionally: (setq gptel-backend (gptel-make-openai ...))
+  #+end_src
+
+- Ollama (local):
+  #+begin_src emacs-lisp
+  (require 'gptel)
+  (setq gptel-backend (gptel-make-ollama "ollama" :host "localhost:11434"))
+  ;; Pick a local model via M-x gptel-set-model or set magpt-model to "llama3" etc.
+  #+end_src
+
+You can set magpt-model to override gptel’s default for magpt requests, or keep it nil.
+
+** Tips
+
+- Best results when run inside an open commit buffer (git-commit-mode), so the message drops in place.
+- If you already typed a message, magpt will ask permission before replacing it (comments are preserved).
+- Large repos: consider increasing magpt-max-diff-bytes or curating staged changes to focus on one logical change.
+
 ** Troubleshooting
 
-- "No Git repository found": Make sure you're in a Git project folder.
-- "No staged changes": Stage your changes with `git add ...` or in Magit.
-- "Commit message buffer not found": Run inside an open commit buffer or use Magit's commit interface.
-- "Message generation... stuck or failed": See `*Messages*` buffer for error output; check gptel backend is running/configured.
+- “No Git repository found”
+  - Ensure you’re inside a Git project; check magpt-project-root-strategy.
+- “No staged changes found”
+  - Stage changes first (git add ... or via Magit).
+- “Empty response from model”
+  - Check gptel backend, API key, or try a different model.
+- “Overlay stuck”
+  - Errors are reported in *Messages*. Overlay should auto-clear on error; if not, re-run or close/reopen the commit buffer.
+- Output not inserted
+  - If no commit buffer is available (or magpt-insert-into-commit-buffer is nil), result goes to *magpt-commit* and the kill-ring.
+
+** Privacy and Security
+
+- magpt-confirm-before-send defaults to t. Review sizes and confirm before uploading diffs to a provider.
+- Sensitive data: if it’s staged, it may be sent. Consider splitting commits or removing secrets before staging.
+- Local providers (e.g., Ollama) keep data on your machine.
+
+** What’s new in 1.0.0
+
+- Default model is nil (inherit from gptel); provider-agnostic by default.
+- Confirmation before sending (shows original/sent bytes; notes truncation).
+- Improved commit buffer handling: robust detection/preservation of git-commit comments.
+- Unified callback/overlay handling; cleaner and more predictable UX.
+- Small internal cleanups and safer project root detection.
 
 ** License
 
-This project is licensed under the MIT License.  
-See the file [[file:LICENSE][LICENSE]] in the repository for full text.
-
-** Packaging & MELPA
-
-This package conforms to Emacs packaging conventions and can be installed:
-
-- From source: Place `magpt.el` in your `load-path` and `(require 'magpt)`.
-- With [quelpa](https://github.com/quelpa/quelpa), [straight.el](https://github.com/raxod502/straight.el), or similar tools.
-- Via MELPA (once accepted): Add MELPA to your `package-archives` and install with `M-x package-install RET magpt RET`.
-
-MELPA recipe for this package (for maintainers/contributors):
-
-#+begin_example
-magpt
-:repo "11111000000/magpt"
-:fetcher github
-#+end_example
-
-** Author
-
-Peter <11111000000@email.com>
+MIT. See [[file:LICENSE][LICENSE]].
 
 ** Links
 
-- [GitHub – magpt](https://github.com/11111000000/magpt)
-- [gptel](https://github.com/karthink/gptel) (dependency)
-- [Magit](https://magit.vc/) (optional dependency)
+- Repo: https://github.com/11111000000/magpt
+- gptel: https://github.com/karthink/gptel
+- Magit: https://magit.vc/
 

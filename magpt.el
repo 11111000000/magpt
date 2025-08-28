@@ -159,6 +159,12 @@ The prompt shows the size in bytes (and notes if truncation will apply)."
   :type 'boolean
   :group 'magpt)
 
+(defcustom magpt-send-on-empty-context nil
+  "If non-nil, still send an LLM request when a task's collected context is empty (0 bytes).
+When nil, magpt will skip the network call and record a panel entry instead."
+  :type 'boolean
+  :group 'magpt)
+
 ;;;; Project rc (.magptrc) support
 
 (defcustom magpt-rc-file-name ".magptrc"
@@ -936,35 +942,46 @@ When disabled, registry APIs remain available but are not bound or invoked."
   "Run TASK: collect context, build prompt, request model, render/apply.
 CTX is passed to the task's context function. Experimental."
   (pcase-let* ((`(,data ,_preview ,bytes) (funcall (magpt-task-context-fn task) ctx))
-               (prompt (funcall (magpt-task-prompt-fn task) data))
-               (ok (if (magpt-task-confirm-send? task)
-                       (magpt--confirm-send bytes bytes)
-                     t)))
-    (when ok
-      (let ((gptel-model (or magpt-model gptel-model)))
-        (magpt--log "run-task: %s bytes=%d info-lang=%S commit-lang=%S prompt-preview=%s"
-                    (magpt-task-name task) (or bytes -1) magpt-info-language magpt-commit-language
-                    (let ((n (min 180 (length prompt)))) (substring prompt 0 n)))
-        (magpt--gptel-request
-         prompt
-         :system (magpt--system-prompt 'info)
-         :callback
-         (lambda (resp info)
-           (ignore info)
-           (let ((magpt--current-request prompt))
-             (condition-case err
-                 (let ((out (string-trim (magpt--response->string resp))))
-                   (magpt--log "task-callback: %s resp-type=%S out-preview=%s"
-                               (magpt-task-name task) (type-of resp)
-                               (substring out 0 (min 180 (length out))))
-                   (funcall (magpt-task-render-fn task) out data)
-                   (when (magpt-task-apply-fn task)
-                     (funcall (magpt-task-apply-fn task) out data)))
-               (error
-                (magpt--log "task-callback exception: %s\nBT:\n%s"
-                            (error-message-string err) (magpt--backtrace-string))
-                (message "%s" (magpt--i18n 'callback-error (error-message-string err)))))))
-         :stream magpt-stream-output)))))
+               (prompt (funcall (magpt-task-prompt-fn task) data)))
+    (if (and (or (null bytes) (zerop bytes))
+             (not magpt-send-on-empty-context))
+        (let* ((name (magpt-task-name task))
+               (note "Пустой контекст; запрос к LLM пропущен")
+               (resp (if (eq name 'explain-status)
+                         ;; Детерминированный JSON для чистого статуса — годится для дальнейшего меню.
+                         "{\"summary\":\"Рабочее дерево чистое, индекс пуст.\",\"risks\":[],\"suggestions\":[{\"title\":\"Обновить локальный репозиторий\",\"commands\":[\"git fetch --all\",\"git pull --ff-only\"]},{\"title\":\"Начать новую ветку\",\"commands\":[\"git switch -c feature/initial\"]}]}"
+                       "{\"note\":\"empty context; nothing to send\"}")))
+          (magpt--log "run-task: %s skipped (empty context)" name)
+          (magpt--panel-append-entry name (or prompt "") resp note)
+          (message "magpt: nothing to send for %s (empty context)" name))
+      (let ((ok (if (magpt-task-confirm-send? task)
+                    (magpt--confirm-send bytes bytes)
+                  t)))
+        (when ok
+          (let ((gptel-model (or magpt-model gptel-model)))
+            (magpt--log "run-task: %s bytes=%d info-lang=%S commit-lang=%S prompt-preview=%s"
+                        (magpt-task-name task) (or bytes -1) magpt-info-language magpt-commit-language
+                        (let ((n (min 180 (length prompt)))) (substring prompt 0 n)))
+            (magpt--gptel-request
+             prompt
+             :system (magpt--system-prompt 'info)
+             :callback
+             (lambda (resp info)
+               (ignore info)
+               (let ((magpt--current-request prompt))
+                 (condition-case err
+                     (let ((out (string-trim (magpt--response->string resp))))
+                       (magpt--log "task-callback: %s resp-type=%S out-preview=%s"
+                                   (magpt-task-name task) (type-of resp)
+                                   (substring out 0 (min 180 (length out))))
+                       (funcall (magpt-task-render-fn task) out data)
+                       (when (magpt-task-apply-fn task)
+                         (funcall (magpt-task-apply-fn task) out data)))
+                   (error
+                    (magpt--log "task-callback exception: %s\nBT:\n%s"
+                                (error-message-string err) (magpt--backtrace-string))
+                    (message "%s" (magpt--i18n 'callback-error (error-message-string err)))))))
+             :stream magpt-stream-output)))))))
 
 ;;;###autoload
 (defun magpt-run-task (name &optional ctx)

@@ -151,6 +151,7 @@ Read-only tasks that observe and suggest, without mutating the repo. Results are
 
 - Notes
   - All tasks prompt for confirmation (shows bytes to be sent).
+  - Empty context behavior: if the collected context is empty (e.g., clean working tree), magpt skips the LLM request and records a panel entry. You can override this via `magpt-send-on-empty-context`.
   - No mutations: results are text/JSON only; “Insert/Apply” remain disabled.
   - Local LLMs are recommended by default (via gptel); cloud providers require explicit setup.
 

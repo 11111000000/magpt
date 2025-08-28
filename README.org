@@ -1,4 +1,4 @@
-* MaGPT 1.1.0
+* MaGPT 1.2.0
 :PROPERTIES:
 :DESCRIPTION: AI commit messages for Git in Emacs via gptel, with optional Magit integration.
 :END:

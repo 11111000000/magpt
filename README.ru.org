@@ -1,0 +1,284 @@
+:PROPERTIES:
+:GPTEL_MODEL: gpt-5
+:GPTEL_BACKEND: AI Tunnel
+:GPTEL_SYSTEM: Ты — ИИ, живущий в Emacs под NIXOS. Отвечай в виде Org-mode. Любые списки представляй заголовками и пунктами Org.
+:GPTEL_BOUNDS: ((response (321 4096) (4114 18935)))
+:END:
+Переведи документацию на русский. Выдай полный текст
+
+
+
+#+begin_reasoning
+**Translating documentation to Russian*
+
+I need to translate the documentation into Russian, including multiple files. The user asked for the full text and classified everything in “documentation,” which likely includes README.org, magpt-analyse.org content, and commentary blocks in magpt.el. However, code doesn’t need translation, just comments. While the typical ask focuses on README, the term “документацию” suggests a broader scope. So, I’ll be translating the necessary content while avoiding non-documentation sections.*Translating README.org to Russian*
+
+I see that providing the full code with translated comments would be a lot, and it wasn’t asked explicitly. The user mentioned "Переведи документацию на русский," likely targeting README.org. Since the initial prompt includes its entire content, I think the best route is to provide a complete Russian version. I’ll translate the prose while preserving the structure and code blocks, including sections like "Example Scenario." I’ll also make sure to present everything in Org-mode and keep the relevant metadata properties in Russian too.*Deciding on README translation*
+
+I’m considering the translation request, and it seems likely that I only need to translate the README file since "документацию" feels ambiguous. The magpt-analyse.org document is mostly in Russian, so it shouldn't need translation. The user asked for the "полный текст," which I interpret as the full README content. I’ll handle it in Org-mode with headings and bullet lists, translating sections like "Vision," "Features," and "Installation" while keeping code blocks unchanged. I’ll also maintain any inline code formatting as necessary.*Preparing for README translation*
+
+The instructions say to format lists as headings and bullet points, which works for me. The README uses bullet lists and paragraphs, so I'll keep that structure. I’m set to craft the Russian translation, including everything from the README org within triple backticks. I will maintain the title in Russian and ensure the description property is translated too. I'll adjust anchor links to Russian while keeping their tags intact. The "Links" section will stay as well, and the Org-mode format will fit nicely. Let’s get started!*Producing translated content*
+
+I’m ready to translate and create the content I need. The main title will be “MaGPT — Универсальный, безопасный AI‑помощник для Git/Magit в Emacs,” and I’ll include the description property too. I plan to translate each section as follows: 
+
+- Vision -> Видение
+- Features -> Возможности
+- Principles -> Принципы
+- Installation -> Установка
+- Quickstart -> Быстрый старт
+- Example Scenario -> Пример сценария: спокойная точность, полная прозрачность
+- Commands -> Команды
+- Customization -> Настройка
+- Provider setup -> Настройка провайдера (через gptel)
+- Per-project configuration -> Настройка для проекта: .magptrc
+- Magpt Panel -> Панель magpt: Прозрачность процесса
+- Security and Privacy -> Безопасность и конфиденциальность
+- Extending MaGPT -> Расширение MaGPT
+- Task Examples -> Примеры задач (текущие и планируемые)
+- Roadmap & Release Plan -> Дорожная карта и план релизов
+- Test Practices -> Практики тестирования
+- Tips -> Советы
+- Troubleshooting -> Устранение неполадок
+- License -> Лицензия
+- Links -> Ссылки
+- Future Plans: Philosophy of Improvement -> Будущие планы: философия улучшений
+
+I'll also translate the English line at the end, maintain all code blocks as is, and ensure anchor links like [[#future-roadmap][Будущая дорожная карта]] remain the same. I need to mention the planned MELPA support too and keep shortcuts like "M-x" and "C-c C-c" unchanged. I’ll keep all bullet lists and formatting simple with "-" for lists and "*”, "*", etc., for headings. Let’s get writing!
+#+end_reasoning
+
+/ MaGPT — Универсальный, безопасный AI‑помощник для Git/Magit в Emacs
+:PROPERTIES:
+:DESCRIPTION: Модульный и расширяемый AI‑помощник для Git в Emacs. Независим от провайдера, безопасность прежде всего, спроектирован для качества рабочего процесса и эволюционного развития. Работает через gptel.
+:END:
+
+* Видение
+- MaGPT — развивающийся пакет для Emacs, предоставляющий универсального AI‑помощника для работы с Git‑репозиториями, особенно через Magit. Начавшись как лучший в своём классе генератор сообщений коммитов, он переходит к расширяемой, задачно‑ориентированной архитектуре для всех фаз Git‑рабочего процесса: обзор статуса, авторство коммитов, стейджинг “по намерению”, наименование ветвей, посредничество при конфликтах, работа с историей, сводки и безопасные предпросмотры автоматизируемых изменений.
+- MaGPT создан для:
+  - ясных, безопасных, обратимых взаимодействий на каждом шаге;
+  - строгой приватности “по умолчанию”: явное подтверждение пользователя и минимальный, при необходимости маскируемый контекст;
+  - плавной интеграции с Emacs, Magit и gptel без навязывания новых привязок клавиш или режимов;
+  - будущего роста через чистый реестр задач и систему плагинов — готов к новым сценариям по мере развития AI и сообщества Emacs.
+- См. [[#future-roadmap][Дорожную карту]] для планов следующих фаз и философии.
+
+* Возможности
+- Генерация высококачественных сообщений коммитов из застейдженного диффа с учетом Conventional Commits.
+- Объяснение статуса, линт/правка сообщений коммитов и предложение имени ветки — как безопасные AI‑задачи с предпросмотром.
+- Структурированный, независимый от провайдера API через gptel: поддерживает OpenAI, Ollama (локально) и другие.
+- Интеграция с Magit: кнопки и пункты меню являются дополнительными (никогда не ломают стандартные настройки).
+- Приватность и контроль: каждую отправку данных и каждое изменение нужно подтвердить; секреты могут маскироваться.
+- Асинхронный, неблокирующий UX: оверлеи/прогресс в буферах коммитов; панель с историей взаимодействий.
+- Расширяемое, модульное ядро: лёгкое добавление новых задач (патчи, changelog’и, rebase/todo, разрешение конфликтов).
+- Поддержка =.magptrc= на проект: настраиваемые язык, промпты и значения по умолчанию.
+- Надёжный набор тестов: усечение UTF‑8, определение границ комментариев, логика вставки, проверка JSON.
+
+* Принципы
+- Минимальные, компонуемые единицы задач: сбор контекста, построение промпта, отображение результата и (опционально) применение.
+- Всегда предпросмотр; никакой мутации состояния репозитория без dry‑run, диффа и подтверждения пользователя.
+- Только расширять существующие потоки Magit/VC/project — без навязчивых хуков и переназначений.
+- Local‑first, cloud‑optional: ничего не утекает в облако без вашего выбора; маскирование поощряется.
+
+* Установка
+- Клонируйте или поместите =magpt.el= в ваш =load-path= и подключите:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/magpt/")
+(require 'magpt)
+#+end_src
+
+- Пример (с использованием use-package и straight.el):
+
+#+begin_src emacs-lisp
+(straight-use-package '(magpt :type git :host github :repo "11111000000/magpt"))
+(use-package magpt
+  :after gptel
+  :commands (magpt-generate-commit-message magpt-commit-staged)
+  :init
+  (magpt-mode 1)) ; Необязательно: добавляет пункт "Commit with AI message" в transient-меню Magit
+#+end_src
+
+- Поддержка MELPA запланирована для стабильного релизного цикла.
+
+* Быстрый старт
+- Подготовьте изменения (через Magit или =git add=).
+- Откройте буфер коммита (Magit: =C= затем =c=).
+- Сгенерируйте:
+  - в буфере коммита: =M-x magpt-generate-commit-message=
+  - или открыть+заполнить сразу: =M-x magpt-commit-staged=
+- Подтвердите отправку диффа (видно размеры в байтах/превью безопасности).
+- Проверьте предложенное сообщение вверху, при необходимости поправьте, затем =C-c C-c= для коммита.
+- Исследуйте новые безопасные задачи через =M-x magpt-show-panel= и связанные команды.
+
+* Пример сценария: спокойная точность, полная прозрачность
+- Откройте Magit Status (=M-x magit-status=).
+- Нажмите =e= для “Explain status”: получите краткий обзор и оценку рисков.
+- Используйте “Stage by intent”: magpt предложит логические группы для стейджинга, которые можно просмотреть и подтвердить.
+- Запросите “Commit with AI message”: вы всегда подтверждаете, что будет отправлено; сообщение появляется в контексте и никогда не навязывается.
+- При конфликте появятся “Explain conflict” и “Propose resolution patch” — с dry‑run диффами и полным контролем.
+- Буфер панели magpt ведёт журнал всех запросов и ответов для последующего просмотра.
+- Ничего не пушится и не мёржится без вашего ведома — никаких скрытых побочных эффектов.
+
+* Команды
+- =magpt-generate-commit-message=: Сообщение из застейдженного диффа, в буфер коммита или отдельный буфер результатов.
+- =magpt-commit-staged=: (С Magit) Открыть буфер коммита и авто‑заполнить сообщением.
+- =magpt-mode=: Необязательный глобальный minor‑mode; добавляет “[i] Commit with AI message” в transient‑меню коммита Magit.
+  - Также добавляет следующие пункты в =magit-dispatch= (если включено):
+    - =e=: Explain status (magpt)
+    - =E=: Explain hunk/region (magpt)
+    - =S=: Stage by intent (magpt)
+    - =A=: Apply last stage-by-intent (magpt)
+    - =R=: Range/PR summary (magpt)
+- Экспериментальные, задачно‑ориентированные безопасные команды (включаются через =magpt-enable-task-registry=):
+  - =magpt-explain-status=
+  - =magpt-commit-lint-suggest=
+  - =magpt-branch-name-suggest=
+  - =magpt-show-panel=
+  - =magpt-run-task= (для всех зарегистрированных/экспериментальных задач)
+  - =magpt-explain-hunk-region= (Фаза 2, только чтение: объяснить выделенный регион или текущий хунк)
+  - =magpt-stage-by-intent=, =magpt-stage-by-intent-apply-last= (Фаза 2: предложить группы; Применить ограниченно — стейдж/анстейдж файла целиком)
+  - =magpt-range-summary= (Фаза 2: сводка PR/MR по диапазону коммитов; только текст)
+  - =magpt-stage-by-intent-hunks= (Фаза 2: на уровне хуков через unified diff; предпросмотр; безопасное применение к индексу после =git apply --cached --check=)
+  - =magpt-resolve-conflict-here= (Фаза 3: объяснение конфликта + предложение минимального патча; предпросмотр и =git apply --check= только)
+
+* Настройка
+- Все опции — в =M-x customize-group RET magpt RET= или через файл =.magptrc= для настроек на проект.
+
+- Ключевые переменные:
+  - =magpt-model=: имя модели LLM; наследует провайдера gptel.
+  - =magpt-commit-prompt=: шаблон промпта; может быть языко‑ или проект‑специфичным.
+  - =magpt-max-diff-bytes=: максимальный размер диффа в байтах для отправки.
+  - =magpt-confirm-before-send=: подтверждение перед отправкой контента (показывает исходный и отправляемый размер; предупреждает об усечении).
+  - =magpt-commit-overlay-text=: текст оверлея в буфере коммита (можно локализовать).
+  - =magpt-project-root-strategy=: как определять корень репозитория (Magit/VC/project.el).
+  - =magpt-enable-task-registry=: включить экспериментальный, расширяемый конвейер задач и UI панели.
+  - =magpt-transient-colorize=: подсвечивать пункты MaGPT в transient‑меню Magit (по умолчанию: включено).
+  - =magpt-transient-face=: настроить face (цвет/стиль) для пунктов MaGPT в transient’ах.
+- Дополнительные настройки включают выбор провайдера (см. ниже), язык и опции отдельных задач через реестр.
+
+* Настройка провайдера (через gptel)
+- OpenAI:
+  #+begin_src emacs-lisp
+  (setq gptel-api-key (getenv "OPENAI_API_KEY"))
+  #+end_src
+- Ollama/локально:
+  #+begin_src emacs-lisp
+  (require 'gptel)
+  (setq gptel-backend (gptel-make-ollama "ollama" :host "localhost:11434"))
+  ;; Укажите magpt-model на имя вашей локальной модели (например, "llama3")
+  #+end_src
+- Если =magpt-model= равен =nil=, используется текущее значение gptel.
+
+* Настройка на проект: =.magptrc=
+- =.magptrc= в корне проекта переопределяет любые пользовательские опции, используя безопасный формат Emacs Lisp: alist из пар =(ПЕРЕМЕННАЯ . ЗНАЧЕНИЕ)=. Пример:
+
+#+begin_src emacs-lisp
+'(
+  (magpt-info-language . "Русский")
+  (magpt-commit-language . "English")
+  (magpt-panel-auto-pop . t)
+  (magpt-enable-task-registry . t)
+  (magpt-model . "gpt-4.1-mini"))
+#+end_src
+
+* Панель magpt: прозрачность процесса
+- Панель (=*magpt-panel/=) журналирует все AI‑задачи: запросы, ответы, валидность JSON, заметки и аудит безопасности. Вы видите, что именно было отправлено и получено, со схемами и контекстными действиями.
+- Динамичная строка “Actions” показывает, когда доступна “Apply” (только для безопасных, обратимых операций).
+- Кнопки панели:
+  - [Copy], [JSON] — доступны для любой записи (скопировать ответ; открыть в JSON‑буфере и красиво отформатировать, если валиден).
+  - [Apply] — для планов =stage-by-intent= (на уровне файла: =git add=/=git restore --staged=; с подтверждением).
+  - [Open patch], [Check patch], [Apply to index] — для задач на основе патчей (например, =stage-by-intent-hunks=); проверка через =git apply --check= и опционально безопасное применение через =git apply --cached=, всегда с предпросмотром и подтверждением.
+- Привязки в панели (=magpt-panel-mode=):
+  - c — скопировать ответ текущей записи в kill‑ring
+  - j — открыть ответ текущей записи в JSON‑буфере (при валидном JSON — отформатировать)
+
+* Безопасность и конфиденциальность
+- Пользователь всегда подтверждает, что будет отправлено (и в каком размере); есть индикация усечения.
+- Секреты (токены, ключи) никогда не отправляются автоматически; в будущих версиях — маскирование по шаблонам.
+- По умолчанию — никакого облака; локальные LLM (например, Ollama) — самый безопасный выбор.
+- Никаких необратимых операций с git: все изменения — через предпросмотр, dry‑run и подтверждение.
+- Операции применения:
+  - На уровне файлов — только =git add= и =git restore --staged= (обратимые).
+  - Задачи с патчами используют =git apply --check= для валидации и опционально =git apply --cached= (только индекс), всегда с явным предпросмотром и подтверждением.
+
+* Расширение MaGPT
+- Реестр задач MaGPT упрощает добавление новых “задач”:
+  - Каждая задача определяет:
+    - функцию контекста: собирает “ровно столько, сколько нужно” из git или Emacs;
+    - построитель промпта: форматирует, маркирует, задаёт схему ответа;
+    - рендерер: показывает результат в =*magpt-panel/=, в буфере коммита или как diff/patch;
+    - (опционально) безопасное применение: всегда dry‑run и явная валидация пользователем.
+  - Чтобы добавить задачу:
+    1. Напишите код контекста, промпта, отображения и (опционально) применения.
+    2. Зарегистрируйте её через =magpt-register-task=.
+    3. Сразу вызывайте через =magpt-run-task=.
+- См. код для примеров.
+
+* Примеры задач (текущие и планируемые)
+- Наблюдать:
+  - Объяснение статуса репозитория, статуса по файлу/хунку, застейдженных изменений, сводка рисков, обобщение истории.
+- Предлагать:
+  - Сообщение коммита из диффа, имена веток, сводки PR/MR, линт/фиксации, группы стейджинга “по намерению”.
+- Рекомендовать и предварительно показывать:
+  - Группировка и предпросмотр стейджинга, минимальные патчи для хуков, безопасные планы rebase.
+- Разрешать и посредничать:
+  - Объяснение merge‑конфликтов; предложение минимальных патчей для разрешения с предпросмотром (никогда не автосливает).
+- Релиз/Документация:
+  - Генерация changelog’ов, заметок о релизе; шаблоны PR/MR из истории.
+- Поиск/Ориентирование:
+  - Планируется: ответы на вопросы о коде (“Q&A”) строго на примерах, с уважением к приватности.
+
+* Дорожная карта и план релизов
+- См. [[#future-roadmap][дорожную карту]] для задуманного цикла “Observe” ➔ “Recommend” ➔ “Resolve” ➔ “Release” (“переходить реку мягко”).
+
+* [[#future-roadmap][Дорожная карта (Future roadmap)]]
+- Фаза 0 (“Упрочнение основы”)
+  - Укрепить конвейер и UX оверлеев, добавить обязательные тесты, построить реестр задач проекта, стабилизировать оверлеи/логи.
+  - Критерии выхода: не меняется наблюдаемое поведение по умолчанию; новые функции — opt‑in и обратимы.
+- Фаза 1 (“Observe” — Наблюдать)
+  - Объяснение статуса, линт/правка коммита, предложение имени ветки в режиме “только чтение”, все результаты — в панели; без мутаций.
+  - Критерии выхода: все сценарии — только предпросмотр, пользователь чётко видит результат, в репозитории ничего не меняется.
+- Фаза 2 (“Recommend” — Рекомендовать)
+  - Объяснение хунка/региона, предложение групп “стейджинга по намерению”, сводка PR/MR по диапазону.
+  - Безопасные, атомарные “apply” для естественно обратимых операций (стейдж/анстейдж).
+  - Критерии выхода: репозиторий не меняется, пока пользователь явно не подтвердит каждое действие.
+- Фаза 3 (“Resolve” — Разрешать)
+  - Объяснение конфликта с предложением патча (ediff/dry‑run), безопасный план rebase.
+  - Все действия — явные, только dry‑run, в любой момент можно отменить.
+- Фаза 4+ (“Release/Extend” — Выпуск/Расширение)
+  - Live‑changelog/заметки о релизе, шаблоны PR/MR (только текст), телеметрия (локальная).
+  - RAG/поиск по коду — интерес на будущее, с жёсткими ограничениями приватности и ясным назначением.
+
+* Практики тестирования
+- Набор на базе ERT: усечение UTF‑8, вставка, корректное снятие оверлея, детекция JSON.
+- Property‑тесты для ворот безопасности и определения границ текста.
+- Без зависимости от LLM во время тестов: gptel подменяется (stub/mocking) для переносимого CI.
+
+* Советы
+- Держите =magpt-enable-task-registry= выключенным для “чистого” генератора сообщений коммитов (как в v1.0.x).
+- Включайте экспериментальные задачи/фичи проекта (=magpt-enable-task-registry= и т.д.) по одной, по мере необходимости.
+- Просматривайте =*magpt-panel/=, чтобы понять, что именно уходит в LLM и что возвращается.
+- Предпочитайте локальные модели на этапе оценки.
+
+* Устранение неполадок
+- “No staged changes found”?
+  - Застейджьте изменения через Magit или =git add=.
+- “Commit message not inserted”?
+  - Если нет буфера коммита, результат показывается в /magpt-commit/ (копируется в kill‑ring).
+- “Model responds slowly/empty”?
+  - Попробуйте другой backend gptel или проверьте логи провайдера.
+- “Overlay stuck”?
+  - Должен убираться сам; попробуйте очистить буфер коммита или открыть заново.
+
+* Лицензия
+- MIT. См. [[file:LICENSE][LICENSE]].
+
+* Ссылки
+- Исходники: https://github.com/11111000000/magpt
+- gptel: https://github.com/karthink/gptel
+- Magit: https://magit.vc/
+
+* Будущие планы: философия улучшений
+- MaGPT стремится быть как вода — мягким, адаптивным, неразрушительным. Каждая новая функция вводится как предваряемый, добавочный “камень в реке”: обратимый и наблюдаемый, без потери контроля. См. “диалектический и даосский анализ” (magpt-analyse.org) и вдохновляющий рассказ в репозитории для подробностей о философии развития.
+
+- С MaGPT вы сохраняете всю силу и ясность Magit — AI помогает только там, где экономит ваше время, никогда не жертвуя безопасностью или контролем. Каждый шаг подтверждается, а вся магия аккуратно и открыто демистифицирована. Приятного, ровного перехода!
+
+*** 

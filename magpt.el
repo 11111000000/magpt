@@ -508,6 +508,21 @@ Requires Magit to be installed."
                (remove-hook 'git-commit-setup-hook hook-fn)
                (message "magpt: could not open Magit commit buffer: %s" (error-message-string err))))))))))
 
+;;;###autoload
+(define-minor-mode magpt-mode
+  "Global minor mode to integrate MagPT AI commit message generation with Magit.
+When enabled, adds a [i] transient command to the Magit commit popup to use AI-based message suggestion."
+  :global t
+  :group 'magpt
+  (if magpt-mode
+      ;; On enable: Add magpt-commit-staged button to Magit commit transient.
+      (with-eval-after-load 'magit
+        (transient-append-suffix 'magit-commit "c"
+          '("i" "Commit with AI message (magpt)" magpt-commit-staged)))
+    ;; On disable: Remove our binding, if present.
+    (with-eval-after-load 'magit
+      (transient-remove-suffix 'magit-commit "i"))))
+
 (provide 'magpt)
 
 ;;; magpt.el ends here

@@ -231,6 +231,64 @@ CONTENT is inserted, buffer-file-name is set to COMMIT_EDITMSG to satisfy
           (should (eq (plist-get e :valid) t)))))))
 
 
+;;; Phase 2 tests
+
+(ert-deftest magpt-panel-actions-line-stage-intent ()
+  "Actions line should offer Apply hint for valid stage-by-intent entries."
+  (let ((magpt-allow-apply-safe-ops t))
+    (let* ((entry (list :task 'stage-by-intent :valid t))
+           (line (magpt--panel-actions-line entry)))
+      (should (string= line (magpt--i18n 'panel-actions-apply-stage-intent)))))
+  (let ((magpt-allow-apply-safe-ops t))
+    (let* ((entry (list :task 'stage-by-intent :valid nil))
+           (line (magpt--panel-actions-line entry)))
+      (should (string= line (magpt--i18n 'panel-actions))))))
+
+(ert-deftest magpt-ctx-hunk-or-region-region-basic ()
+  "Region context should return :kind 'region, non-empty text and positive byte size."
+  (let ((tmp (make-temp-file "magpt" nil ".txt")))
+    (unwind-protect
+        (with-temp-buffer
+          (setq buffer-file-name tmp)
+          (insert "line1\nline2\n")
+          (goto-char (point-min))
+          (set-mark (point))      ; mark at bol of line1
+          (goto-char (line-end-position)) ; region: first line
+          (activate-mark)
+          (let* ((res (magpt--ctx-hunk-or-region nil))
+                 (data (nth 0 res))
+                 (_preview (nth 1 res))
+                 (bytes (nth 2 res)))
+            (should (eq (plist-get data :kind) 'region))
+            (should (string-match-p "line1" (or (plist-get data :text) "")))
+            (should (and (integerp bytes) (> bytes 0)))))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest magpt-apply-stage-intent-executes-ops ()
+  "Applying a simple stage-by-intent plan should call git add/restore with expected args."
+  (let ((magpt--panel-entries nil)
+        (magpt-allow-apply-safe-ops t)
+        (magpt-test--git-calls nil))
+    ;; Panel entry with JSON plan
+    (push (list :time "T"
+                :task 'stage-by-intent
+                :request ""
+                :response
+                "{\"groups\":[{\"title\":\"g1\",\"rationale\":\"x\",\"files\":[{\"path\":\"a.txt\",\"action\":\"stage\"},{\"path\":\"b.txt\",\"action\":\"unstage\"}]}]}")
+          magpt--panel-entries)
+    ;; Stub confirm and git
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+              ((symbol-function 'magpt--project-root) (lambda () default-directory))
+              ((symbol-function 'magpt--git)
+               (lambda (_dir &rest args)
+                 (push args magpt-test--git-calls)
+                 "")))
+      (magpt--apply-stage-by-intent-last)
+      (let ((calls (nreverse magpt-test--git-calls)))
+        (should (equal calls
+                       '(("add" "--" "a.txt")
+                         ("restore" "--staged" "--" "b.txt"))))))))
+
 (provide 'magpt-tests)
 
 ;;; magpt-tests.el ends here

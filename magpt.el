@@ -2,7 +2,7 @@
 
 ;; Author: Peter <11111000000@email.com>
 ;; URL: https://github.com/11111000000/magpt
-;; Version: 1.2.1
+;; Version: 1.3.0
 ;; Package-Requires: ((emacs "28.1") (gptel "0.9"))
 ;; Keywords: tools, vc, git, ai
 
@@ -130,6 +130,12 @@ Otherwise show results in a separate read-only buffer."
 (defcustom magpt-send-on-empty-context nil
   "If non-nil, still send an LLM request when a task's context is empty (0 bytes).
 When nil, magpt skips the request and records a panel entry instead."
+  :type 'boolean
+  :group 'magpt)
+
+(defcustom magpt-allow-apply-safe-ops t
+  "If non-nil, enable safe apply operations (e.g., stage/unstage whole files) from magpt Panel or commands.
+This gates any mutation-producing Apply actions; Phase 2 enables only naturally reversible operations."
   :type 'boolean
   :group 'magpt)
 
@@ -276,6 +282,9 @@ When nil, magpt skips the request and records a panel entry instead."
     (panel-yes . "yes")
     (panel-no . "no or not JSON")
     (panel-actions . "Actions: [Insert disabled] [Apply disabled]")
+    (panel-actions-apply-stage-intent . "Actions: [Apply: M-x magpt-stage-by-intent-apply-last]")
+    (panel-json-opened . "Panel: opened response in JSON buffer")
+    (panel-json-copied . "Panel: response copied to kill-ring")
     (panel-sep . "----------------------------------------")))
 
 (defconst magpt--i18n-ru
@@ -302,6 +311,9 @@ When nil, magpt skips the request and records a panel entry instead."
     (panel-yes . "да")
     (panel-no . "нет или не JSON")
     (panel-actions . "Действия: [Вставка недоступна] [Применение недоступно]")
+    (panel-actions-apply-stage-intent . "Действия: [Применить план стейджинга: M-x magpt-stage-by-intent-apply-last]")
+    (panel-json-opened . "Панель: ответ открыт в JSON буфере")
+    (panel-json-copied . "Панель: ответ скопирован в kill-ring")
     (panel-sep . "----------------------------------------")))
 
 (defun magpt--i18n (key &rest args)
@@ -406,6 +418,28 @@ This does not change final insertion semantics."
      (if (zerop exit)
          out
        (user-error "Git error (%s): %s" exit out)))))
+
+(defun magpt--git-apply-temp (dir patch &rest args)
+  "Apply PATCH (string) via 'git apply' in DIR with ARGS, using a temp file.
+Signal a user-error on non-zero exit."
+  (let ((tmp (make-temp-file "magpt-patch" nil ".patch")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp
+            (insert (string-trim-right (or patch "")) "\n"))
+          (apply #'magpt--git dir "apply" (append args (list tmp))))
+      (ignore-errors (delete-file tmp)))))
+
+(defun magpt--git-apply-check-temp (dir patch &rest args)
+  "Run 'git apply --check' for PATCH (string) in DIR with ARGS.
+Return (EXIT-CODE . OUTPUT) without signaling."
+  (let ((tmp (make-temp-file "magpt-patch" nil ".patch")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp
+            (insert (string-trim-right (or patch "")) "\n"))
+          (apply #'magpt--process-git dir "apply" (append '("--check") args (list tmp))))
+      (ignore-errors (delete-file tmp)))))
 
 (defun magpt--git-root-from (dir)
   "Return the Git repo root directory for DIR, or nil if not found."
@@ -882,6 +916,22 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
 ;;
 ;; Adds a button “[i] Commit with AI message (magpt)” to Magit’s commit transient.
 
+(defface magpt-transient-face
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "Face for MaGPT entries in Magit transient menus."
+  :group 'magpt)
+
+(defcustom magpt-transient-colorize t
+  "If non-nil, colorize MaGPT entries in Magit transient menus."
+  :type 'boolean
+  :group 'magpt)
+
+(defun magpt--transient-desc (s)
+  "Return S, optionally propertized with `magpt-transient-face' for transient menus."
+  (if magpt-transient-colorize
+      (propertize s 'face 'magpt-transient-face)
+    s))
+
 ;;;###autoload
 (define-minor-mode magpt-mode
   "Global minor mode: integrate MaGPT with Magit’s commit transient."
@@ -889,10 +939,29 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
   :group 'magpt
   (if magpt-mode
       (with-eval-after-load 'magit
+        ;; Commit transient: add AI commit entry
         (transient-append-suffix 'magit-commit "c"
-          '("i" "Commit with AI message (magpt)" magpt-commit-staged)))
+          `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged))
+        ;; Magit dispatch: add Phase 2 entries (Recommend). Appended at end.
+        (when (featurep 'transient)
+          (transient-append-suffix 'magit-dispatch nil
+            `("e" ,(magpt--transient-desc "Explain status (magpt)") magpt-explain-status))
+          (transient-append-suffix 'magit-dispatch nil
+            `("E" ,(magpt--transient-desc "Explain hunk/region (magpt)") magpt-explain-hunk-region))
+          (transient-append-suffix 'magit-dispatch nil
+            `("S" ,(magpt--transient-desc "Stage by intent (magpt)") magpt-stage-by-intent))
+          (transient-append-suffix 'magit-dispatch nil
+            `("A" ,(magpt--transient-desc "Apply last stage-by-intent (magpt)") magpt-stage-by-intent-apply-last))
+          (transient-append-suffix 'magit-dispatch nil
+            `("R" ,(magpt--transient-desc "Range/PR summary (magpt)") magpt-range-summary))))
     (with-eval-after-load 'magit
-      (transient-remove-suffix 'magit-commit "i"))))
+      (transient-remove-suffix 'magit-commit "i")
+      (when (featurep 'transient)
+        (transient-remove-suffix 'magit-dispatch "e")
+        (transient-remove-suffix 'magit-dispatch "E")
+        (transient-remove-suffix 'magit-dispatch "S")
+        (transient-remove-suffix 'magit-dispatch "A")
+        (transient-remove-suffix 'magit-dispatch "R")))))
 
 ;;;; Section: Task registry (experimental core abstraction)
 ;;
@@ -970,12 +1039,14 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
      (unless magpt-enable-task-registry
        (user-error "Enable `magpt-enable-task-registry' to use experimental tasks"))
      (magpt--register-assist-tasks)
+     (magpt--register-recommend-tasks)
      (list (intern (completing-read
                     "magpt task: "
                     (mapcar #'symbol-name (magpt--hash-table-keys magpt--tasks)))))))
   (magpt--maybe-load-rc)
   (when magpt-enable-task-registry
-    (magpt--register-assist-tasks))
+    (magpt--register-assist-tasks)
+    (magpt--register-recommend-tasks))
   (let ((task (gethash name magpt--tasks)))
     (unless task (user-error "Unknown magpt task: %s" name))
     (magpt--run-task task ctx)))
@@ -1002,6 +1073,252 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
 (defvar magpt--current-request nil
   "Dynamically bound prompt/request preview for panel rendering.")
 
+(defun magpt--panel-actions-line (entry)
+  "Return a localized actions line for panel ENTRY, reflecting available operations."
+  (let* ((task (plist-get entry :task))
+         (valid (plist-get entry :valid)))
+    (cond
+     ((and (eq task 'stage-by-intent) valid magpt-allow-apply-safe-ops)
+      (magpt--i18n 'panel-actions-apply-stage-intent))
+     (t
+      (magpt--i18n 'panel-actions)))))
+
+;; Panel minor mode for navigation and actions
+(defvar magpt-panel-mode-map
+  (let ((m (make-sparse-keymap)))
+    (define-key m (kbd "c") #'magpt-panel-copy-response)
+    (define-key m (kbd "j") #'magpt-panel-open-response-json)
+    m)
+  "Keymap for `magpt-panel-mode'.")
+
+(define-minor-mode magpt-panel-mode
+  "Minor mode for the MaGPT panel buffer.
+Keys:
+  c — copy current entry response to kill-ring
+  j — open current entry response in JSON buffer (pretty-printed when valid)"
+  :init-value nil :lighter " magpt-panel" :keymap magpt-panel-mode-map
+  (read-only-mode (if magpt-panel-mode 1 -1)))
+
+(defun magpt--panel-entry-at-point ()
+  "Return the panel ENTRY plist at point, or nil if none.
+Relies on 'magpt-entry text property."
+  (let ((pos (point)) entry)
+    (setq entry (get-text-property pos 'magpt-entry))
+    (while (and (null entry) (> pos (point-min)))
+      (setq pos (1- (or (previous-single-property-change pos 'magpt-entry nil (point-min))
+                        (point-min))))
+      (setq entry (get-text-property pos 'magpt-entry)))
+    entry))
+
+(defun magpt-panel-copy-response ()
+  "Copy current entry's response to the kill-ring."
+  (interactive)
+  (let* ((e (or (magpt--panel-entry-at-point) (car (last magpt--panel-entries)))))
+    (unless e (user-error "No panel entry at point"))
+    (let ((resp (plist-get e :response)))
+      (kill-new resp)
+      (message "%s" (magpt--i18n 'panel-json-copied)))))
+
+(defun magpt-panel-open-response-json ()
+  "Open current entry's response in a JSON buffer and pretty-print when valid."
+  (interactive)
+  (let* ((e (or (magpt--panel-entry-at-point) (car (last magpt--panel-entries)))))
+    (unless e (user-error "No panel entry at point"))
+    (let* ((resp (plist-get e :response))
+           (buf (get-buffer-create "*magpt-json*")))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (string-trim-right resp) "\n")
+          (goto-char (point-min))
+          (when (fboundp 'json-mode) (ignore-errors (json-mode)))
+          (condition-case _err
+              (progn
+                ;; Try to pretty-print; falls back silently if invalid JSON.
+                (when (fboundp 'json-pretty-print-buffer)
+                  (json-pretty-print-buffer)))
+            (error nil))
+          (setq buffer-read-only t)))
+      (pop-to-buffer buf)
+      (message "%s" (magpt--i18n 'panel-json-opened)))))
+
+(defun magpt--btn--call (fn entry)
+  "Helper to call FN with ENTRY, catching errors."
+  (condition-case err
+      (funcall fn entry)
+    (error (message "magpt: %s" (error-message-string err)))))
+
+(defun magpt--btn-copy (button)
+  (let ((e (button-get button 'magpt-entry)))
+    (magpt--btn--call
+     (lambda (entry)
+       (let ((resp (plist-get entry :response)))
+         (kill-new resp)
+         (message "%s" (magpt--i18n 'panel-json-copied))))
+     e)))
+
+(defun magpt--btn-open-json (button)
+  (let ((e (button-get button 'magpt-entry)))
+    (magpt--btn--call
+     (lambda (_entry) (magpt-panel-open-response-json))
+     e)))
+
+(defun magpt--apply-stage-by-intent-entry (entry)
+  "Apply stage/unstage plan from ENTRY (stage-by-intent)."
+  (let* ((data (magpt--panel-ensure-json entry))
+         (groups (or (alist-get 'groups data) '()))
+         (ops (cl-loop for g in groups append
+                       (let ((files (alist-get 'files g)))
+                         (cl-loop for f in files
+                                  for action = (alist-get 'action f)
+                                  for path = (alist-get 'path f)
+                                  when (and (member action '("stage" "unstage"))
+                                            (stringp path) (> (length path) 0))
+                                  collect (cons action path))))))
+    (when (null ops) (user-error "No file operations to apply"))
+    (let* ((root (magpt--project-root))
+           (preview (mapconcat
+                     (lambda (op)
+                       (pcase op
+                         (`("stage" . ,p)   (format "git add -- %s" p))
+                         (`("unstage" . ,p) (format "git restore --staged -- %s" p))
+                         (_ (format "# skip %S" op))))
+                     ops "\n")))
+      (when (y-or-n-p (format "Apply file staging plan?\n%s\nProceed? " preview))
+        (dolist (op ops)
+          (pcase op
+            (`("stage" . ,p)   (ignore-errors (magpt--git root "add" "--" p)))
+            (`("unstage" . ,p) (ignore-errors (magpt--git root "restore" "--staged" "--" p)))
+            (_ nil)))
+        (message "magpt: applied staging plan; review in Magit status")))))
+
+(defun magpt--btn-apply-stage-plan (button)
+  (unless magpt-allow-apply-safe-ops
+    (user-error "Applying operations is disabled (magpt-allow-apply-safe-ops is nil)"))
+  (let ((e (button-get button 'magpt-entry)))
+    (magpt--btn--call #'magpt--apply-stage-by-intent-entry e)))
+
+(defun magpt-panel-open-response-patch (&optional entry)
+  "Open ENTRY's response (or current entry) in a diff-mode buffer."
+  (interactive)
+  (let* ((e (or entry (magpt--panel-entry-at-point)))
+         (resp (plist-get e :response))
+         (buf (get-buffer-create "*magpt-patch*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (string-trim-right resp) "\n")
+        (goto-char (point-min))
+        (when (fboundp 'diff-mode) (ignore-errors (diff-mode)))
+        (setq buffer-read-only t)))
+    (pop-to-buffer buf)
+    (message "%s" (magpt--i18n 'panel-json-opened))))
+
+(defun magpt-panel-check-response-patch (&optional entry &rest args)
+  "Run 'git apply --check' for ENTRY's response patch in index or worktree (per ARGS)."
+  (interactive)
+  (let* ((e (or entry (magpt--panel-entry-at-point)))
+         (resp (plist-get e :response))
+         (root (magpt--project-root))
+         (res (apply #'magpt--git-apply-check-temp root resp args))
+         (exit (car res))
+         (out  (cdr res)))
+    (if (zerop exit)
+        (message "magpt: patch --check OK")
+      (message "magpt: patch --check failed: %s" out))))
+
+(defun magpt--btn-open-patch (button)
+  (magpt--btn--call
+   (lambda (_e) (magpt-panel-open-response-patch (button-get button 'magpt-entry)))
+   (button-get button 'magpt-entry)))
+
+(defun magpt--btn-check-patch (button)
+  (magpt--btn--call
+   (lambda (e) (magpt-panel-check-response-patch e))
+   (button-get button 'magpt-entry)))
+
+(defun magpt--btn-apply-patch-cached (button)
+  "Apply ENTRY's patch to index only (git apply --cached) after confirm."
+  (unless magpt-allow-apply-safe-ops
+    (user-error "Applying operations is disabled (magpt-allow-apply-safe-ops is nil)"))
+  (let* ((e (button-get button 'magpt-entry))
+         (resp (plist-get e :response))
+         (root (magpt--project-root)))
+    (let* ((check (magpt--git-apply-check-temp root resp "--cached"))
+           (ok (zerop (car check)))
+           (preview (with-temp-buffer
+                      (insert (string-trim-right resp) "\n")
+                      (buffer-string))))
+      (if (not ok)
+          (message "magpt: patch --check failed; not applying")
+        (when (y-or-n-p "Apply patch to index (git apply --cached)? ")
+          (ignore-errors (magpt--git-apply-temp root resp "--cached"))
+          (message "magpt: patch applied to index"))))))
+
+(defun magpt--panel-insert-buttons (entry)
+  "Insert action buttons for ENTRY on current line."
+  (let* ((task (plist-get entry :task))
+         (valid (plist-get entry :valid))
+         (start (point)))
+    ;; Common actions
+    (insert "  ")
+    (make-text-button "[Copy]" nil
+                      'action #'magpt--btn-copy
+                      'follow-link t
+                      'help-echo "Copy response to kill-ring"
+                      'magpt-entry entry)
+    (insert "  ")
+    (make-text-button "[JSON]" nil
+                      'action #'magpt--btn-open-json
+                      'follow-link t
+                      'help-echo "Open response in JSON buffer"
+                      'magpt-entry entry)
+    ;; Task-specific
+    (pcase task
+      ('stage-by-intent
+       (when (and valid magpt-allow-apply-safe-ops)
+         (insert "  ")
+         (make-text-button "[Apply]" nil
+                           'action #'magpt--btn-apply-stage-plan
+                           'follow-link t
+                           'help-echo "Apply staging plan (file-level)"
+                           'magpt-entry entry)))
+      ('stage-by-intent-hunks
+       (insert "  ")
+       (make-text-button "[Open patch]" nil
+                         'action #'magpt--btn-open-patch
+                         'follow-link t
+                         'help-echo "Open unified diff patch"
+                         'magpt-entry entry)
+       (insert "  ")
+       (make-text-button "[Check patch]" nil
+                         'action #'magpt--btn-check-patch
+                         'follow-link t
+                         'help-echo "git apply --check"
+                         'magpt-entry entry)
+       (when magpt-allow-apply-safe-ops
+         (insert "  ")
+         (make-text-button "[Apply to index]" nil
+                           'action #'magpt--btn-apply-patch-cached
+                           'follow-link t
+                           'help-echo "git apply --cached (after check)"
+                           'magpt-entry entry)))
+      ('resolve-conflict-here
+       (insert "  ")
+       (make-text-button "[Open patch]" nil
+                         'action #'magpt--btn-open-patch
+                         'follow-link t
+                         'help-echo "Open suggested conflict resolution patch"
+                         'magpt-entry entry)
+       (insert "  ")
+       (make-text-button "[Check patch]" nil
+                         'action #'magpt--btn-check-patch
+                         'follow-link t
+                         'help-echo "Validate patch with git apply --check"
+                         'magpt-entry entry)))
+    (insert "\n")
+    (put-text-property start (point) 'read-only t)))
+
 (defun magpt--panel-buffer ()
   "Return the panel buffer, rendering all entries."
   (let ((buf (get-buffer-create magpt-panel-buffer-name)))
@@ -1010,12 +1327,13 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
         (erase-buffer)
         (insert (format "%s\n\n" (magpt--i18n 'panel-header)))
         (dolist (e (reverse magpt--panel-entries))
-          (let ((ts   (plist-get e :time))
-                (task (plist-get e :task))
-                (req  (plist-get e :request))
-                (resp (plist-get e :response))
-                (valid (plist-get e :valid))
-                (note (or (plist-get e :note) "")))
+          (let* ((start (point))
+                 (ts   (plist-get e :time))
+                 (task (plist-get e :task))
+                 (req  (plist-get e :request))
+                 (resp (plist-get e :response))
+                 (valid (plist-get e :valid))
+                 (note (or (plist-get e :note) "")))
             (insert (format "=== %s — %s ===\n" ts task))
             (when (and (stringp note) (> (length note) 0))
               (insert (format (concat (magpt--i18n 'panel-note) "\n") note)))
@@ -1027,9 +1345,13 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
             (insert (format "\n%s\n"
                             (format (magpt--i18n 'panel-valid)
                                     (if valid (magpt--i18n 'panel-yes) (magpt--i18n 'panel-no)))))
-            (insert (magpt--i18n 'panel-actions) "\n")
-            (insert (magpt--i18n 'panel-sep) "\n\n"))))
-      (read-only-mode 1)
+            (let ((actions (magpt--panel-actions-line e)))
+              (insert actions "\n"))
+            (magpt--panel-insert-buttons e)
+            (insert (magpt--i18n 'panel-sep) "\n\n")
+            (let ((end (point)))
+              (put-text-property start end 'magpt-entry e)))))
+      (magpt-panel-mode 1)
       (goto-char (point-min)))
     buf))
 
@@ -1060,6 +1382,414 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                 (substring resp 0 (min 180 (length resp))))
     (when magpt-panel-auto-pop
       (magpt-show-panel))))
+
+;;;; Section: Apply infrastructure (Phase 2)
+;;
+;; Generic helpers for applying results from the panel. Only safe operations are
+;; allowed in Phase 2 (e.g., stage/unstage whole files), gated by
+;; `magpt-allow-apply-safe-ops'.
+
+(defun magpt--panel-tasks-in-history ()
+  "Return a list of unique task symbols present in the panel history."
+  (delete-dups (mapcar (lambda (e) (plist-get e :task)) magpt--panel-entries)))
+
+(defun magpt--panel-last-entry-for (task)
+  "Return the most recent panel entry plist for TASK, or nil if none.
+Entries are pushed to the head of `magpt--panel-entries', so the first match is the latest."
+  (seq-find (lambda (e) (eq (plist-get e :task) task))
+            magpt--panel-entries))
+
+(defun magpt--panel-ensure-json (entry)
+  "Parse and return JSON from panel ENTRY's response as an alist.
+Arrays are returned as lists to simplify iteration.
+Signal a user-error if the response is not valid JSON."
+  (let ((resp (plist-get entry :response)))
+    (condition-case _err
+        (json-parse-string (or resp "") :object-type 'alist :array-type 'list)
+      (error
+       (user-error "Response is not valid JSON for task %s" (plist-get entry :task))))))
+
+;;;###autoload
+(defun magpt-apply-last (task)
+  "Apply the most recent result for TASK from the panel.
+This command only performs safe, reversible operations and is gated by
+`magpt-allow-apply-safe-ops'. Concrete task handlers are enabled in later steps."
+  (interactive
+   (progn
+     (unless magpt-enable-task-registry
+       (user-error "Enable `magpt-enable-task-registry' to use apply commands"))
+     (let* ((tasks (magpt--panel-tasks-in-history))
+            (names (mapcar (lambda (s) (symbol-name s)) tasks))
+            (choice (completing-read "Apply last for task: " names nil t)))
+       (list (intern choice)))))
+  (unless magpt-allow-apply-safe-ops
+    (user-error "Applying operations is disabled (magpt-allow-apply-safe-ops is nil)"))
+  (pcase task
+    ('stage-by-intent (magpt--apply-stage-by-intent-last))
+    (_ (user-error "No apply handler for task: %s" task))))
+
+;;;; Section: Recommend tasks (Phase 2) — Explain Hunk/Region
+;;
+;; Read-only task that explains a selected region in a file buffer or the current
+;; Magit diff hunk under point. No mutations; result is shown in the panel.
+
+(defun magpt--ctx-hunk-or-region (_ctx)
+  "Return (data preview bytes) for current region in a file buffer or Magit diff hunk.
+DATA is a plist with at least :kind and :text; may include :file :start :end."
+  (cond
+   ;; Region in a file-visiting buffer
+   ((and (region-active-p) buffer-file-name)
+    (let* ((beg (region-beginning))
+           (end (region-end))
+           (text (buffer-substring-no-properties beg end))
+           (line-beg (line-number-at-pos beg))
+           (line-end (line-number-at-pos end))
+           (data (list :kind 'region
+                       :file (abbreviate-file-name buffer-file-name)
+                       :start line-beg :end line-end
+                       :text text)))
+      (list data text (magpt--string-bytes text))))
+   ;; Magit diff hunk under point (heuristic search for @@ headers)
+   ((and (derived-mode-p 'magit-diff-mode))
+    (save-excursion
+      (let (hstart hend)
+        (unless (re-search-backward "^@@ " nil t)
+          (user-error "Place point inside a diff hunk (header starts with @@)"))
+        (setq hstart (line-beginning-position))
+        (if (re-search-forward "^@@ \\|^diff --git " nil t)
+            (setq hend (line-beginning-position))
+          (setq hend (point-max)))
+        (let* ((text (buffer-substring-no-properties hstart hend))
+               (data (list :kind 'hunk :file "<diff>" :text text)))
+          (list data text (magpt--string-bytes text))))))
+   (t
+    (user-error "Select a region in a file or place point on a Magit diff hunk"))))
+
+(defun magpt--prompt-explain-hunk (data)
+  "Build prompt for explaining a code change (region or diff hunk) with DATA."
+  (let ((ilang (or magpt-info-language "English"))
+        (text (or (plist-get data :text) "")))
+    (format (concat
+             "Explain the following code change concisely.\n"
+             "Return ONLY JSON with fields:\n"
+             "  summary: string,\n"
+             "  rationale: string,\n"
+             "  risks: array of strings\n"
+             "Answer STRICTLY in %s for all textual fields. No Markdown outside JSON.\n\n"
+             "--- BEGIN CONTEXT ---\n%s\n--- END CONTEXT ---\n")
+            ilang
+            text)))
+
+(defun magpt--render-explain-hunk (json _data)
+  "Render result JSON for 'explain-hunk-region' into the panel."
+  (magpt--panel-append-entry 'explain-hunk-region (or magpt--current-request "") (or json "")
+                             "JSON: {summary, rationale, risks[]}"))
+
+(defvar magpt--recommend-tasks-registered nil
+  "Non-nil when recommend (Phase 2) tasks have been registered.")
+
+(defun magpt--register-recommend-tasks ()
+  "Register Phase 2 recommend tasks:
+- Explain Hunk/Region (read-only)
+- Stage by Intent (groups, file-level apply only)
+- Stage by Intent (hunks via unified diff; safe preview/apply to index)
+- PR/Range Summary (read-only)"
+  (unless magpt--recommend-tasks-registered
+    ;; Explain Hunk/Region
+    (magpt-register-task
+     (magpt--task :name 'explain-hunk-region
+                  :title "Explain Hunk/Region"
+                  :scope 'file
+                  :context-fn #'magpt--ctx-hunk-or-region
+                  :prompt-fn  #'magpt--prompt-explain-hunk
+                  :render-fn  #'magpt--render-explain-hunk
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Stage by Intent (file-level actions only)
+    (magpt-register-task
+     (magpt--task :name 'stage-by-intent
+                  :title "Stage by Intent (groups)"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-stage-intent
+                  :prompt-fn  #'magpt--prompt-stage-intent
+                  :render-fn  #'magpt--render-stage-intent
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Stage by Intent (hunks via unified diff)
+    (magpt-register-task
+     (magpt--task :name 'stage-by-intent-hunks
+                  :title "Stage by Intent (hunks via patch)"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-stage-intent-hunks
+                  :prompt-fn  #'magpt--prompt-stage-intent-hunks
+                  :render-fn  #'magpt--render-stage-intent-hunks
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; PR/Range Summary
+    (magpt-register-task
+     (magpt--task :name 'range-summary
+                  :title "PR/Range Summary"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-range-summary
+                  :prompt-fn  #'magpt--prompt-range-summary
+                  :render-fn  #'magpt--render-range-summary
+                  :apply-fn   nil
+                  :confirm-send? t))
+    (setq magpt--recommend-tasks-registered t)))
+
+;;;###autoload
+(defun magpt-explain-hunk-region ()
+  "Run 'Explain Hunk/Region' (Phase 2, read-only) and show result in *magpt-panel*."
+  (interactive)
+  (magpt--maybe-load-rc)
+  (unless magpt-enable-task-registry
+    (user-error "Enable `magpt-enable-task-registry' to use experimental tasks"))
+  (magpt--register-recommend-tasks)
+  (magpt-run-task 'explain-hunk-region))
+
+;;;; Section: Recommend tasks (Phase 2) — Stage by Intent (hunks via unified diff)
+;;
+;; Ask the model to produce a minimal unified diff patch to stage selected hunks.
+;; We validate with `git apply --cached --check` and (optionally) apply to index.
+
+(defun magpt--ctx-stage-intent-hunks (_ctx)
+  "Collect context for hunk-level staging patch suggestion.
+Return (data preview bytes)."
+  (let* ((root (magpt--project-root))
+         ;; Provide both porcelain and full unstaged diff for better grounding.
+         (porc (magpt--git root "status" "--porcelain"))
+         (diff (magpt--git root "diff" "--no-color"))
+         (preview (format "STATUS:\n%s\n\nDIFF:\n%s"
+                          (string-join (seq-take (split-string porc "\n" t) 200) "\n")
+                          (if (> (length diff) 8000) (concat (substring diff 0 8000) " …") diff)))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :porcelain porc :diff diff) preview bytes)))
+
+(defun magpt--prompt-stage-intent-hunks (data)
+  "Build prompt for hunk-level staging patch suggestion."
+  (let ((ilang (or magpt-info-language "English")))
+    (format (concat
+             "Produce a minimal unified diff to STAGE only the most coherent hunks.\n"
+             "Rules:\n"
+             "- Output ONLY a valid unified diff (no prose, no Markdown).\n"
+             "- Base is the current working tree; the patch MUST apply with `git apply --cached --check`.\n"
+             "- Prefer safe, small steps; do not include unrelated hunks.\n"
+             "Answer STRICTLY in %s (only if any textual fields appear; usually none).\n\n"
+             "--- BEGIN STATUS ---\n%s\n--- END STATUS ---\n\n"
+             "--- BEGIN DIFF ---\n%s\n--- END DIFF ---\n")
+            ilang
+            (plist-get data :porcelain)
+            (plist-get data :diff))))
+
+(defun magpt--render-stage-intent-hunks (patch _data)
+  "Render the suggested unified diff PATCH to the panel."
+  (magpt--panel-append-entry 'stage-by-intent-hunks (or magpt--current-request "") (or patch "")
+                             "Unified diff; check via git apply --cached --check"))
+
+;;;###autoload
+(defun magpt-stage-by-intent-hunks ()
+  "Request a minimal unified diff to stage selected hunks (safe preview)."
+  (interactive)
+  (magpt--maybe-load-rc)
+  (unless magpt-enable-task-registry
+    (user-error "Enable `magpt-enable-task-registry' to use experimental tasks"))
+  (magpt--register-recommend-tasks)
+  (magpt-run-task 'stage-by-intent-hunks))
+
+;;;; Section: Recommend tasks (Phase 2) — Stage by Intent
+;;
+;; Suggest logical groups of changes to stage/unstage. Apply is limited to
+;; reversible, whole-file operations only (git add / git restore --staged).
+
+(defun magpt--ctx-stage-intent (_ctx)
+  "Collect porcelain status for stage-by-intent task.
+Return (data preview bytes) where DATA is the raw porcelain for simplicity."
+  (let* ((root (magpt--project-root))
+         (porc (magpt--git root "status" "--porcelain"))
+         (bytes (magpt--string-bytes porc)))
+    (list porc porc bytes)))
+
+(defun magpt--prompt-stage-intent (porcelain)
+  "Build prompt for stage-by-intent. Answer strictly in `magpt-info-language'."
+  (let ((ilang (or magpt-info-language "English")))
+    (format (concat
+             "Group the following Git changes into a few logical groups for staging.\n"
+             "Return ONLY JSON with:\n"
+             "  groups: array of { title: string, rationale: string, files: array of { path: string, action: \"stage\"|\"unstage\" } }\n"
+             "Constraints: only whole-file actions (no hunks). Prefer minimal, safe steps.\n"
+             "Answer STRICTLY in %s for textual fields.\n\n"
+             "--- BEGIN PORCELAIN ---\n%s\n--- END PORCELAIN ---\n")
+            ilang porcelain)))
+
+(defun magpt--render-stage-intent (json _data)
+  "Render result JSON for 'stage-by-intent' into the panel."
+  (magpt--panel-append-entry 'stage-by-intent (or magpt--current-request "") (or json "")
+                             "JSON: {groups[].files[{path,action:stage|unstage}]}"))
+
+(defun magpt--apply-stage-by-intent-last ()
+  "Apply the latest 'stage-by-intent' plan from the panel.
+File-level only; asks for confirmation and shows explicit git commands."
+  (interactive)
+  (unless magpt-allow-apply-safe-ops
+    (user-error "Applying operations is disabled (magpt-allow-apply-safe-ops is nil)"))
+  (let* ((e (magpt--panel-last-entry-for 'stage-by-intent)))
+    (unless e (user-error "No 'stage-by-intent' results in panel"))
+    (let* ((data (magpt--panel-ensure-json e))
+           ;; Be tolerant to older/wrong schema: accept 'group' as fallback.
+           (groups (or (alist-get 'groups data)
+                       (alist-get 'group data)
+                       '()))
+           (ops (cl-loop for g in groups append
+                         (let ((files (alist-get 'files g)))
+                           (cl-loop for f in files
+                                    for action = (alist-get 'action f)
+                                    for path = (alist-get 'path f)
+                                    when (and (member action '("stage" "unstage"))
+                                              (stringp path) (> (length path) 0))
+                                    collect (cons action path))))))
+      (when (null ops) (user-error "No file operations to apply"))
+      (let* ((root (magpt--project-root))
+             (preview (mapconcat
+                       (lambda (op)
+                         (pcase op
+                           (`("stage" . ,p)   (format "git add -- %s" p))
+                           (`("unstage" . ,p) (format "git restore --staged -- %s" p))
+                           (_ (format "# skip %S" op))))
+                       ops "\n")))
+        (when (y-or-n-p (format "Apply file staging plan?\n%s\nProceed? " preview))
+          (dolist (op ops)
+            (pcase op
+              (`("stage" . ,p)   (ignore-errors (magpt--git root "add" "--" p)))
+              (`("unstage" . ,p) (ignore-errors (magpt--git root "restore" "--staged" "--" p)))
+              (_ nil)))
+          (message "magpt: applied staging plan; review in Magit status"))))))
+
+;;;###autoload
+(defun magpt-stage-by-intent ()
+  "Run 'Stage by Intent' (Phase 2) and show plan in *magpt-panel* (read-only)."
+  (interactive)
+  (magpt--maybe-load-rc)
+  (unless magpt-enable-task-registry
+    (user-error "Enable `magpt-enable-task-registry' to use experimental tasks"))
+  (magpt--register-recommend-tasks)
+  (magpt-run-task 'stage-by-intent))
+
+;;;###autoload
+(defun magpt-stage-by-intent-apply-last ()
+  "Apply latest 'Stage by Intent' plan from the panel (file-level only)."
+  (interactive)
+  (magpt--apply-stage-by-intent-last))
+
+;;;; Section: Recommend tasks (Phase 2) — PR/Range Summary
+;;
+;; Read-only task that summarizes a commit range into a PR/MR description.
+
+(defun magpt--read-range-default ()
+  "Read a commit RANGE using Magit if available; otherwise prompt."
+  (if (and (featurep 'magit) (fboundp 'magit-read-range))
+      (magit-read-range "Range for summary")
+    (read-string "Range (e.g., HEAD~5..HEAD): " "HEAD~5..HEAD")))
+
+(defun magpt--ctx-range-summary (range)
+  "Collect LOG/STAT for RANGE. Return (data preview bytes)."
+  (let* ((root (magpt--project-root))
+         (rng (or range (magpt--read-range-default)))
+         (log (magpt--git root "log" "--no-color" "--date=short"
+                          "--pretty=%h %ad %an %s" rng))
+         (stat (magpt--git root "log" "--no-color" "--stat" "--oneline" rng))
+         (preview (format "RANGE: %s\n\nLOG:\n%s\n\nSTAT:\n%s"
+                          rng
+                          (if (> (length log) 4000) (concat (substring log 0 4000) " …") log)
+                          (string-join (seq-take (split-string stat "\n" t) 200) "\n")))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :range rng :log log :stat stat) preview bytes)))
+
+(defun magpt--prompt-range-summary (data)
+  "Build prompt for PR/Range Summary using DATA (:range :log :stat)."
+  (let ((ilang (or magpt-info-language "English")))
+    (format (concat
+             "Draft a concise Pull Request description for the given commit range.\n"
+             "Return ONLY JSON with fields:\n"
+             "  title: string,\n"
+             "  summary: string,\n"
+             "  highlights: array of strings,\n"
+             "  checklist: array of strings\n"
+             "Answer STRICTLY in %s.\n\n"
+             "--- RANGE ---\n%s\n\n--- LOG ---\n%s\n\n--- STAT ---\n%s\n")
+            ilang
+            (plist-get data :range)
+            (plist-get data :log)
+            (plist-get data :stat))))
+
+(defun magpt--render-range-summary (json _data)
+  "Render PR/Range Summary JSON into the panel."
+  (magpt--panel-append-entry 'range-summary (or magpt--current-request "") (or json "")
+                             "JSON: {title, summary, highlights[], checklist[]}"))
+
+;;;###autoload
+(defun magpt-range-summary (&optional range)
+  "Run 'PR/Range Summary' task and show result in *magpt-panel* (read-only)."
+  (interactive)
+  (magpt--maybe-load-rc)
+  (unless magpt-enable-task-registry
+    (user-error "Enable `magpt-enable-task-registry' to use experimental tasks"))
+  (magpt--register-recommend-tasks)
+  (magpt-run-task 'range-summary range))
+
+;;;; Section: Resolve tasks (Phase 3) — Conflicts (preview only)
+;;
+;; Explain conflict and propose minimal patch. We only show and validate; no apply by default.
+
+(defun magpt--ctx-conflict-buffer (_ctx)
+  "Collect current buffer with conflict markers for patch suggestion."
+  (save-excursion
+    (goto-char (point-min))
+    (unless (re-search-forward "^<<<<<<< " nil t)
+      (user-error "No conflict markers in current buffer")))
+  (let* ((fname (or buffer-file-name (buffer-name)))
+         (text (buffer-substring-no-properties (point-min) (point-max)))
+         (bytes (magpt--string-bytes text)))
+    (list (list :file fname :text text) text bytes)))
+
+(defun magpt--prompt-resolve-conflict (data)
+  "Prompt for conflict resolution patch."
+  (format (concat
+           "You resolve Git merge conflicts. Output ONLY a minimal unified diff patch.\n"
+           "Rules:\n- Base path: %s\n- Keep both sides' intent; minimal edits.\n- No prose, only unified diff.\n\n"
+           "--- BEGIN FILE WITH CONFLICT ---\n%s\n--- END FILE ---\n")
+          (plist-get data :file)
+          (plist-get data :text)))
+
+(defun magpt--render-resolve-conflict (patch _data)
+  "Render suggested conflict resolution PATCH."
+  (magpt--panel-append-entry 'resolve-conflict-here (or magpt--current-request "") (or patch "")
+                             "Unified diff; preview and validate with git apply --check"))
+
+(defvar magpt--resolve-tasks-registered nil
+  "Non-nil when resolve (Phase 3) tasks are registered.")
+
+(defun magpt--register-resolve-tasks ()
+  (unless magpt--resolve-tasks-registered
+    (magpt-register-task
+     (magpt--task :name 'resolve-conflict-here
+                  :title "Resolve conflict here (patch suggestion)"
+                  :scope 'file
+                  :context-fn #'magpt--ctx-conflict-buffer
+                  :prompt-fn  #'magpt--prompt-resolve-conflict
+                  :render-fn  #'magpt--render-resolve-conflict
+                  :apply-fn   nil
+                  :confirm-send? t))
+    (setq magpt--resolve-tasks-registered t)))
+
+;;;###autoload
+(defun magpt-resolve-conflict-here ()
+  "Explain and propose a minimal patch for the current conflict (preview only)."
+  (interactive)
+  (magpt--maybe-load-rc)
+  (unless magpt-enable-task-registry
+    (user-error "Enable `magpt-enable-task-registry' to use experimental tasks"))
+  (magpt--register-resolve-tasks)
+  (magpt-run-task 'resolve-conflict-here))
 
 ;;;; Section: Assist tasks (Phase 1, read-only)
 ;;

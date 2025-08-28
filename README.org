@@ -82,12 +82,20 @@ MELPA support is planned for the stable release cycle.
 - =magpt-generate-commit-message=: Message from staged diff, into commit buffer or dedicated result buffer.
 - =magpt-commit-staged=: (With Magit) Open commit buffer and auto-fill message.
 - =magpt-mode=: Optional global minor mode; adds "[i] Commit with AI message" to Magit commit menu.
+  Also adds the following entries to =magit-dispatch= (when enabled):
+  - =E=: Explain hunk/region (magpt)
+  - =S=: Stage by intent (magpt)
+  - =A=: Apply last stage-by-intent (magpt)
+  - =R=: Range/PR summary (magpt)
 - Experimental, task-oriented safer commands (enable with =magpt-enable-task-registry=):
     - =magpt-explain-status=
     - =magpt-commit-lint-suggest=
     - =magpt-branch-name-suggest=
     - =magpt-show-panel=
     - =magpt-run-task= (for all registered/more experimental tasks)
+    - =magpt-explain-hunk-region= (Phase 2, read-only: explain selected region or current hunk)
+    - =magpt-stage-by-intent=, =magpt-stage-by-intent-apply-last= (Phase 2: suggest groups; Apply limited to whole-file stage/unstage)
+    - =magpt-range-summary= (Phase 2: PR/MR summary from a commit range; text only)
 
 ** Customization
 
@@ -101,6 +109,8 @@ Key variables:
 - =magpt-commit-overlay-text=: Overlay display string in commit buffer (can be localized).
 - =magpt-project-root-strategy=: How to find repo root (Magit/VC/project.el).
 - =magpt-enable-task-registry=: Enable experimental, extensible AI task pipeline and Panel UI.
+- =magpt-transient-colorize=: Colorize MaGPT entries in Magit transient menus (default: on).
+- =magpt-transient-face=: Customize face (color/style) for MaGPT entries in transients.
 
 Other customization includes provider selection (see next section), language, and per-task options via the registry.
 

@@ -175,7 +175,8 @@ CONTENT is inserted, buffer-file-name is set to COMMIT_EDITMSG to satisfy
                                     ;; Run callback with empty response
                                     (let ((msgs (magpt-test--capture-message
                                                  (magpt--commit-callback "" (list :context (current-buffer))))))
-                                      (should (seq-some (lambda (s) (string-match-p "empty response" s)) msgs)))
+                                      (let* ((expected (magpt--i18n 'empty-response)))
+                                        (should (seq-some (lambda (s) (string-match-p (regexp-quote expected) s)) msgs))))
                                     ;; Overlay must be removed
                                     (should (null magpt--commit-overlay)))))
 
@@ -189,6 +190,46 @@ CONTENT is inserted, buffer-file-name is set to COMMIT_EDITMSG to satisfy
                                       (magpt--commit-callback "" (list :context (current-buffer)))
                                       (should (null magpt--commit-overlay))
                                       (should (null magpt--overlay-spinner-timer))))))
+
+;;; Panel/request recording tests
+
+(ert-deftest magpt-panel-records-request-preview ()
+  "Panel entry should store request preview and validate JSON."
+  (let ((magpt--panel-entries nil))
+    (magpt--panel-append-entry 'explain-status "PROMPT-X" "{\"x\":1}")
+    (let ((e (car magpt--panel-entries)))
+      (should (equal (plist-get e :request) "PROMPT-X"))
+      (should (equal (plist-get e :response) "{\"x\":1}"))
+      ;; Bare JSON string or object/array should be considered valid JSON by parser.
+      (should (eq (plist-get e :valid) t)))))
+
+
+(ert-deftest magpt-run-task-binds-request-and-appends-panel ()
+  "Running a task should bind `magpt--current-request' and append a panel entry."
+  (let ((magpt--panel-entries nil))
+    (cl-letf (((symbol-function 'magpt--gptel-request)
+               (lambda (_prompt &rest args)
+                 ;; Immediately invoke callback with a small JSON payload.
+                 (let ((cb (plist-get args :callback)))
+                   (funcall cb "{\"ok\":true}" nil)))))
+      (let* ((task (magpt--task
+                    :name 't1
+                    :title "t1"
+                    :scope 'repo
+                    :context-fn (lambda (_ctx) (list 'data "prev" 1))
+                    :prompt-fn (lambda (_data) "PROMPT-TEST")
+                    :render-fn (lambda (out data)
+                                 (ignore data)
+                                 ;; Use common renderer that relies on `magpt--current-request'.
+                                 (magpt--render-to-panel 't1 out data))
+                    :apply-fn nil
+                    :confirm-send? nil)))
+        (magpt--run-task task nil)
+        (let ((e (car magpt--panel-entries)))
+          (should (string= (plist-get e :request) "PROMPT-TEST"))
+          (should (string-match-p "\"ok\"" (plist-get e :response)))
+          (should (eq (plist-get e :valid) t)))))))
+
 
 (provide 'magpt-tests)
 

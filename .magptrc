@@ -1,0 +1,32 @@
+;; .magptrc — per-project settings for magpt.
+;; Format: Emacs Lisp alist of (VARIABLE . VALUE) pairs.
+;; These settings override user options (highest priority).
+
+'(
+  ;; Язык информационных сообщений (обзоры, пояснения, рационали)
+  (magpt-info-language . "Русский")
+
+  ;; Язык для генерируемых сообщений коммитов
+  (magpt-commit-language . "English")
+
+  ;; Шаблон промпта для генерации коммит-сообщений (на русском)
+  (magpt-commit-prompt .
+  "You are an assistant that writes high-quality Git commit messages.
+  Requirements:
+  - Use Conventional Commits types when applicable (feat, fix, docs, refactor, test, chore, perf, build, ci).
+  - First line: concise summary <= 72 chars.
+  - Optional body: wrap at ~72 chars per line; explain motivation, context, and impact.
+  - Use imperative mood; do not include ticket/issue references unless present in diff.
+  - If the diff is empty or unclear, say 'chore: update' with a brief rationale.
+  Provide the final commit message only, no extra commentary.")
+
+  ;; Небольшие UX‑правки под русский
+  (magpt-commit-overlay-text . "Генерация сообщения...")
+
+  ;; Панель задач автоматически показывать после ответа
+  (magpt-panel-auto-pop . t)
+
+  ;; (по желанию) Включить экспериментальный реестр задач
+  (magpt-enable-task-registry . t)
+
+  (magpt-model . "gpt-4.1-mini"))

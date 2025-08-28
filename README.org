@@ -1,4 +1,4 @@
-* MaGPT 1.0.0
+* MaGPT 1.1.0
 :PROPERTIES:
 :DESCRIPTION: AI commit messages for Git in Emacs via gptel, with optional Magit integration.
 :END:
@@ -124,6 +124,35 @@ Acceptance criteria for Phase 0:
 - Reversibility: default behavior unchanged; new infra is behind flags.
 - Observability: clear messages in *Messages*, stable overlay cleanup on errors/empty responses.
 - Tests cover: UTF‑8 truncation bounds, commit comment boundaries, and empty model responses.
+
+** Assist (Phase 1, experimental)
+
+Read-only tasks that observe and suggest, without mutating the repo. Results are shown in a unified panel buffer (*magpt-panel*) with history. “Insert/Apply” controls are shown but disabled in this phase.
+
+- Enabling
+  - Customize: M-x customize-variable RET magpt-enable-task-registry RET → t
+  - Panel auto-pop on each task: M-x customize-variable RET magpt-panel-auto-pop RET
+
+- New interactive commands
+  - M-x magpt-explain-status
+    - Sends git status --porcelain to the model and returns JSON:
+      { summary, risks[], suggestions[] (title, commands[]) }.
+    - Renders JSON in *magpt-panel* and attempts basic JSON validation.
+  - M-x magpt-commit-lint-suggest
+    - Uses current commit buffer’s message (top section) and staged diff.
+    - Returns JSON: { status: ok|issues, issues[], suggestion{ replace, message } }.
+    - Renders JSON in *magpt-panel* (no automatic changes to the message).
+  - M-x magpt-branch-name-suggest
+    - Uses changed paths from porcelain status.
+    - Returns JSON: { name, alternatives[], rationale }.
+    - Renders JSON in *magpt-panel*.
+  - M-x magpt-show-panel
+    - Opens the *magpt-panel* buffer to review task history for the current repository.
+
+- Notes
+  - All tasks prompt for confirmation (shows bytes to be sent).
+  - No mutations: results are text/JSON only; “Insert/Apply” remain disabled.
+  - Local LLMs are recommended by default (via gptel); cloud providers require explicit setup.
 
 ** How It Works
 

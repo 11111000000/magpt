@@ -37,6 +37,7 @@
 (require 'gptel)
 (require 'vc)
 (require 'project)
+(require 'seq)
 (eval-when-compile (require 'subr-x))
 (require 'magit nil t) ;; опционально
 
@@ -46,7 +47,7 @@
   :group 'vc
   :prefix "magpt-")
 
-(defcustom magpt-model "gpt-4.1"
+(defcustom magpt-model nil
   "Name of the LLM model for gptel, or nil.
 If nil, uses the default model/provider configured in gptel.
 Example: \"gpt-4o-mini\" or any other model available in your gptel setup."
@@ -173,11 +174,9 @@ Signal error if no repository is found."
             (_ (list #'magpt--try-root-from-magit
                      #'magpt--try-root-from-vc
                      #'magpt--try-root-from-project))))
-         (root (seq-some (lambda (f) (funcall f)) candidates)))
-    (setq root (or root (magpt--git-root-from default-directory)))
-    (setq root (or root (when (file-directory-p default-directory)
-                          (let ((probe (magpt--git-root-from default-directory)))
-                            probe))))
+         (root (or (seq-some (lambda (f) (funcall f)) candidates)
+                   (and (file-directory-p default-directory)
+                        (magpt--git-root-from default-directory)))))
     (unless root
       (user-error "No Git repository found for current directory"))
     root))
@@ -279,30 +278,24 @@ Heuristics:
         (delete-overlay magpt--commit-overlay)
         (setq magpt--commit-overlay nil)))))
 
+(defun magpt--comment-line-regexp ()
+  "Return a regexp that matches comment lines in a Git commit buffer."
+  (let* ((c (or (and (boundp 'git-commit-comment-char) git-commit-comment-char)
+                (and (boundp 'comment-start)
+                     (stringp comment-start)
+                     (> (length comment-start) 0)
+                     (aref comment-start 0))
+                ?#)))
+    (format "^%c.*$" c)))
+
 (defun magpt--insert-into-commit-buffer (text)
   "Insert TEXT into the commit message buffer, asking for confirmation if needed.
-Preserves comment lines (lines starting with #) at the bottom of the buffer.
-Inserts the generated message at the top. Returns t if insertion is performed; nil otherwise."
+Preserves comment lines at the bottom. Inserts the generated message at the top.
+Returns t if insertion is performed; nil otherwise."
   (let ((target (or (and (magpt--commit-buffer-p) (current-buffer))
                     (magpt--find-commit-buffer))))
     (when target
-      (with-current-buffer target
-        (let* ((comment-pos (save-excursion
-                              (goto-char (point-min))
-                              (when (re-search-forward "^#.*$" nil t)
-                                (match-beginning 0))))
-               (msg-end (or comment-pos (point-max)))
-               (existing (string-trim (buffer-substring-no-properties (point-min) msg-end))))
-          (when (or (string-empty-p existing)
-                    (y-or-n-p "Replace the current commit message and insert the generated one? "))
-            (let ((inhibit-read-only t))
-              ;; Only remove the current message (up to comments), keep comments.
-              (delete-region (point-min) msg-end)
-              (goto-char (point-min))
-              (insert (string-trim-right text) "\n")
-              (goto-char (point-min)))
-            (message "magpt: commit message inserted into %s" (buffer-name target))
-            t))))))
+      (magpt--insert-into-commit-buffer-target target text))))
 
 (defun magpt--show-in-output-buffer (text)
   "Show TEXT in the *magpt-commit* buffer and copy to kill-ring."
@@ -340,30 +333,12 @@ Behavior:
     (let* ((trunc (magpt--maybe-truncate diff magpt-max-diff-bytes))
            (diff (car trunc))
            (truncatedp (cdr trunc))
-           (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp))
-           (callback
-            (lambda (response info)
-              (condition-case err
-                  (progn
-                    (when target (magpt--remove-commit-overlay target))
-                    (let ((errstr (plist-get info :error)))
-                      (if errstr
-                          (message "magpt/gptel error: %s" errstr)
-                        (let ((text (string-trim (or response ""))))
-                          (if (string-empty-p text)
-                              (message "magpt: empty response from model")
-                            (if (and magpt-insert-into-commit-buffer
-                                     (magpt--insert-into-commit-buffer text))
-                                (message "magpt: commit message inserted")
-                              (magpt--show-in-output-buffer text)))))))
-                (error
-                 (when target (magpt--remove-commit-overlay target))
-                 (message "magpt: error in callback: %s" (error-message-string err)))))))
+           (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp)))
       (when target (magpt--show-commit-overlay target))
       (message "magpt: requesting LLM to generate commit message...")
       (condition-case err
           (let ((gptel-model (or magpt-model gptel-model)))
-            (gptel-request prompt :callback callback))
+            (gptel-request prompt :context target :callback #'magpt--commit-callback))
         (error
          (when target (magpt--remove-commit-overlay target))
          (message "magpt: error calling gptel: %s" (error-message-string err)))))))
@@ -372,14 +347,14 @@ Behavior:
 
 (defun magpt--insert-into-commit-buffer-target (buf text)
   "Insert TEXT into the specified commit message buffer BUF.
-Preserves comment lines (lines starting with #) at the bottom of the buffer.
+Preserves comment lines (lines starting with the Git comment char) at the bottom
 Inserts the generated message at the top. Returns t if insertion is performed; nil otherwise."
   (when (and (buffer-live-p buf))
     (with-current-buffer buf
       (when (magpt--commit-buffer-p)
         (let* ((comment-pos (save-excursion
                               (goto-char (point-min))
-                              (when (re-search-forward "^#.*$" nil t)
+                              (when (re-search-forward (magpt--comment-line-regexp) nil t)
                                 (match-beginning 0))))
                (msg-end (or comment-pos (point-max)))
                (existing (string-trim (buffer-substring-no-properties (point-min) msg-end))))
@@ -395,38 +370,36 @@ Inserts the generated message at the top. Returns t if insertion is performed; n
             t))))))
 
 (defun magpt--commit-callback (response info)
-  "Callback for gptel. Inserts the response into the commit message buffer.
-First tries to use the buffer from :context; if not found or unavailable,
-tries to find any active commit message buffer. If there is no buffer, outputs
-the result to *Messages*."
+  "Callback for gptel. Inserts or displays the generated commit message.
+Prefers inserting into the commit buffer when `magpt-insert-into-commit-buffer' is non-nil
+and a suitable buffer is available (taken from :context or searched via `magpt--find-commit-buffer').
+Otherwise shows the result in *magpt-commit* and copies it to the kill-ring."
   (condition-case err
       (let* ((errstr (plist-get info :error))
              (commit-buf (plist-get info :context))
              (target (or (and (buffer-live-p commit-buf)
                               (magpt--commit-buffer-p commit-buf)
                               commit-buf)
-                         (magpt--find-commit-buffer))))
-        (if errstr
-            (progn
-              (when (buffer-live-p commit-buf)
-                (magpt--remove-commit-overlay commit-buf))
-              (message "magpt/gptel error: %s" errstr))
-          (let ((text (string-trim (or response ""))))
-            (cond
-             ((string-empty-p text)
-              (when (buffer-live-p target)
-                (magpt--remove-commit-overlay target))
-              (message "magpt: empty response from model"))
-             (target
-              ;; Remove overlay before inserting.
-              (magpt--remove-commit-overlay target)
-              (if (magpt--insert-into-commit-buffer-target target text)
-                  (message "magpt: commit message inserted into commit buffer")
-                (message "magpt: insertion cancelled by user")))
-             (t
-              (when (buffer-live-p commit-buf)
-                (magpt--remove-commit-overlay commit-buf))
-              (message "magpt: commit buffer unavailable; generated message:\n%s" text))))))
+                         (magpt--find-commit-buffer)))
+             (text (string-trim (or response ""))))
+        (cond
+         (errstr
+          (when (buffer-live-p commit-buf)
+            (magpt--remove-commit-overlay commit-buf))
+          (message "magpt/gptel error: %s" errstr))
+         ((string-empty-p text)
+          (when (buffer-live-p commit-buf)
+            (magpt--remove-commit-overlay commit-buf))
+          (message "magpt: empty response from model"))
+         ((and magpt-insert-into-commit-buffer target)
+          (magpt--remove-commit-overlay target)
+          (if (magpt--insert-into-commit-buffer-target target text)
+              (message "magpt: commit message inserted into commit buffer")
+            (message "magpt: insertion cancelled by user")))
+         (t
+          (when (buffer-live-p commit-buf)
+            (magpt--remove-commit-overlay commit-buf))
+          (magpt--show-in-output-buffer text))))
     (error
      (message "magpt: error in callback: %s" (error-message-string err)))))
 

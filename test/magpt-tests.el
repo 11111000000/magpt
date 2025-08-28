@@ -14,6 +14,14 @@
     (when (and proj-root (file-directory-p proj-root))
       (add-to-list 'load-path proj-root))))
 
+;; Stub `gptel' when running tests without the package installed.
+(unless (featurep 'gptel)
+  (defvar gptel-model nil)
+  (defun gptel-request (&rest _args)
+    "Test stub for gptel-request. Should not be called in unit tests."
+    (error "gptel stub called"))
+  (provide 'gptel))
+
 (require 'magpt)
 
 (defconst magpt-test--project-root
@@ -141,6 +149,46 @@ CONTENT is inserted, buffer-file-name is set to COMMIT_EDITMSG to satisfy
                                       (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil)))
                                         (should-not (magpt--insert-into-commit-buffer-target (current-buffer) "New")))
                                       (should (equal before (buffer-string)))))))
+
+;; Utilities for capturing `message' output in tests.
+(defmacro magpt-test--capture-message (&rest body)
+  "Execute BODY while capturing calls to `message'. Return list of messages."
+  (declare (indent 0))
+  `(let (acc)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args)
+                  (if (null fmt)
+                      nil
+                    (let ((str (apply #'format fmt args)))
+                      (push str acc)
+                      str)))))
+       ,@body)
+     (nreverse acc)))
+
+(ert-deftest magpt-callback-empty-response-cleans-overlay ()
+  "Empty model response should not insert text; overlay is cleaned; message is logged."
+  (magpt-test--with-commit-buffer "Summary\n\n# C1\n"
+                                  (let ((git-commit-comment-char ?#))
+                                    ;; Prepare overlay
+                                    (magpt--show-commit-overlay (current-buffer))
+                                    (should (overlayp magpt--commit-overlay))
+                                    ;; Run callback with empty response
+                                    (let ((msgs (magpt-test--capture-message
+                                                 (magpt--commit-callback "" (list :context (current-buffer))))))
+                                      (should (seq-some (lambda (s) (string-match-p "empty response" s)) msgs)))
+                                    ;; Overlay must be removed
+                                    (should (null magpt--commit-overlay)))))
+
+(ert-deftest magpt-spinner-stops-on-cleanup ()
+  "Spinner timer should be cancelled when overlay is removed (e.g., on empty response)."
+  (let ((magpt-progress-spinner t))
+    (magpt-test--with-commit-buffer "S\n\n# C\n"
+                                    (let ((git-commit-comment-char ?#))
+                                      (magpt--show-commit-overlay (current-buffer))
+                                      (should (timerp magpt--overlay-spinner-timer))
+                                      (magpt--commit-callback "" (list :context (current-buffer)))
+                                      (should (null magpt--commit-overlay))
+                                      (should (null magpt--overlay-spinner-timer))))))
 
 (provide 'magpt-tests)
 

@@ -38,7 +38,8 @@
 (require 'vc)
 (require 'project)
 (require 'seq)
-(eval-when-compile (require 'subr-x))
+(require 'cl-lib)
+(require 'subr-x)
 (require 'magit nil t) ;; опционально
 
 (defgroup magpt nil
@@ -162,7 +163,7 @@ Return the root path as a string, or nil if not found."
 
 (defun magpt--project-root ()
   "Determine the Git project root according to `magpt-project-root-strategy'.
-Signal error if no repository is found."
+Signal error if no repository is found. Always returns an absolute, normalized directory."
   (let* ((candidates
           (pcase magpt-project-root-strategy
             ('prefer-magit
@@ -180,12 +181,12 @@ Signal error if no repository is found."
             (_ (list #'magpt--try-root-from-magit
                      #'magpt--try-root-from-vc
                      #'magpt--try-root-from-project))))
-         (root (or (seq-some (lambda (f) (funcall f)) candidates)
-                   (and (file-directory-p default-directory)
-                        (magpt--git-root-from default-directory)))))
-    (unless root
+         (root-s (or (seq-some (lambda (f) (funcall f)) candidates)
+                     (and (file-directory-p default-directory)
+                          (magpt--git-root-from default-directory)))))
+    (unless root-s
       (user-error "No Git repository found for current directory"))
-    root))
+    (file-name-as-directory (expand-file-name root-s))))
 
 (defun magpt--staged-diff (root)
   "Return the diff string for staged changes in ROOT.
@@ -273,8 +274,59 @@ Heuristics:
   "Face for the commit message generation overlay."
   :group 'magpt)
 
+(defcustom magpt-progress-spinner nil
+  "If non-nil, animate the commit overlay while waiting for the model."
+  :type 'boolean
+  :group 'magpt)
+
+(defcustom magpt-overlay-spinner-frames
+  '("⠁" "⠂" "⠄" "⠂")
+  "Frames used for the simple spinner animation."
+  :type '(repeat string)
+  :group 'magpt)
+
+(defcustom magpt-stream-output nil
+  "If non-nil, request streaming from gptel when supported.
+This is experimental and does not change insertion behavior."
+  :type 'boolean
+  :group 'magpt)
+
 (defvar-local magpt--commit-overlay nil
   "Overlay shown in the commit buffer while message generation is in progress.")
+(defvar-local magpt--overlay-spinner-timer nil
+  "Internal timer for overlay spinner animation.")
+(defvar-local magpt--overlay-spinner-phase 0
+  "Internal spinner phase index for overlay animation.")
+
+(defun magpt--overlay-spinner-on (buf)
+  "Start spinner animation in BUF if `magpt-progress-spinner' is enabled."
+  (when (and magpt-progress-spinner (buffer-live-p buf))
+    (with-current-buffer buf
+      (unless (timerp magpt--overlay-spinner-timer)
+        (setq magpt--overlay-spinner-phase 0)
+        (setq magpt--overlay-spinner-timer
+              (run-with-timer
+               0 0.12
+               (lambda (b)
+                 (when (buffer-live-p b)
+                   (with-current-buffer b
+                     (when (overlayp magpt--commit-overlay)
+                       (let* ((frames magpt-overlay-spinner-frames)
+                              (i (mod magpt--overlay-spinner-phase (max 1 (length frames))))
+                              (frame (nth i frames))
+                              (txt (concat frame " " magpt-commit-overlay-text "\n")))
+                         (setq magpt--overlay-spinner-phase (1+ magpt--overlay-spinner-phase))
+                         (overlay-put magpt--commit-overlay 'before-string
+                                      (propertize txt 'face 'magpt-commit-overlay-face)))))))
+               buf))))))
+
+(defun magpt--overlay-spinner-off (buf)
+  "Stop spinner animation in BUF if running."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when (timerp magpt--overlay-spinner-timer)
+        (cancel-timer magpt--overlay-spinner-timer)
+        (setq magpt--overlay-spinner-timer nil)))))
 
 (defun magpt--show-commit-overlay (buf)
   "Show an overlay in the BUF to indicate commit message generation in progress."
@@ -285,12 +337,14 @@ Heuristics:
           (setq magpt--commit-overlay (make-overlay (point-min) (point-min) buf t t)))
         (overlay-put magpt--commit-overlay 'before-string
                      (propertize (concat magpt-commit-overlay-text "\n")
-                                 'face 'magpt-commit-overlay-face))))))
+                                 'face 'magpt-commit-overlay-face))
+        (magpt--overlay-spinner-on buf)))))
 
 (defun magpt--remove-commit-overlay (buf)
   "Remove overlay in BUF if present."
   (when (buffer-live-p buf)
     (with-current-buffer buf
+      (magpt--overlay-spinner-off buf)
       (when (overlayp magpt--commit-overlay)
         (delete-overlay magpt--commit-overlay)
         (setq magpt--commit-overlay nil)))))
@@ -402,7 +456,10 @@ Behavior:
             (message "magpt: requesting LLM to generate commit message...")
             (condition-case err
                 (let ((gptel-model (or magpt-model gptel-model)))
-                  (gptel-request prompt :context target :callback #'magpt--commit-callback))
+                  (apply #'gptel-request
+                         prompt
+                         (append (list :context target :callback #'magpt--commit-callback)
+                                 (when magpt-stream-output (list :stream t)))))
               (error
                (when target (magpt--remove-commit-overlay target))
                (message "magpt: error calling gptel: %s" (error-message-string err)))))
@@ -512,7 +569,10 @@ Requires Magit to be installed."
                   (message "magpt: requesting LLM to generate commit message...")
                   (condition-case err
                       (let ((gptel-model (or magpt-model gptel-model)))
-                        (gptel-request prompt :context target-buf :callback #'magpt--commit-callback))
+                        (apply #'gptel-request
+                               prompt
+                               (append (list :context target-buf :callback #'magpt--commit-callback)
+                                       (when magpt-stream-output (list :stream t)))))
                     (error
                      (magpt--remove-commit-overlay target-buf)
                      (message "magpt: error calling gptel: %s" (error-message-string err)))))
@@ -531,7 +591,10 @@ Requires Magit to be installed."
                             (message "magpt: requesting LLM to generate commit message...")
                             (condition-case err
                                 (let ((gptel-model (or magpt-model gptel-model)))
-                                  (gptel-request prompt :context buf :callback #'magpt--commit-callback))
+                                  (apply #'gptel-request
+                                         prompt
+                                         (append (list :context buf :callback #'magpt--commit-callback)
+                                                 (when magpt-stream-output (list :stream t)))))
                               (error
                                (magpt--remove-commit-overlay buf)
                                (message "magpt: error calling gptel: %s" (error-message-string err))))))))
@@ -563,6 +626,64 @@ When enabled, adds a [i] transient command to the Magit commit popup to use AI-b
     ;; On disable: Remove our binding, if present.
     (with-eval-after-load 'magit
       (transient-remove-suffix 'magit-commit "i"))))
+
+;; Experimental task registry (Phase 0). Behind flags; does not affect 1.0.0 behavior.
+
+(defcustom magpt-enable-task-registry nil
+  "If non-nil, expose experimental task registry commands.
+When disabled, registry APIs remain available but are not bound or invoked."
+  :type 'boolean
+  :group 'magpt)
+
+(defvar magpt--tasks (make-hash-table :test 'eq)
+  "Registry of magpt tasks keyed by symbol.")
+
+(cl-defstruct (magpt-task (:constructor magpt--task))
+  name title scope context-fn prompt-fn render-fn apply-fn confirm-send?)
+
+(defun magpt--hash-table-keys (ht)
+  "Return a list of keys in hash-table HT."
+  (let (ks) (maphash (lambda (k _v) (push k ks)) ht) (nreverse ks)))
+
+(defun magpt-register-task (task)
+  "Register TASK (a `magpt-task' struct) in the registry."
+  (puthash (magpt-task-name task) task magpt--tasks))
+
+(defun magpt--run-task (task &optional ctx)
+  "Run TASK: collect context, build prompt, request model, render/apply.
+CTX is passed to the task's context function. Experimental."
+  (pcase-let* ((`(,data ,_preview ,bytes) (funcall (magpt-task-context-fn task) ctx))
+               (prompt (funcall (magpt-task-prompt-fn task) data))
+               (ok (if (magpt-task-confirm-send? task)
+                       (magpt--confirm-send bytes bytes)
+                     t)))
+    (when ok
+      (let ((gptel-model (or magpt-model gptel-model)))
+        (apply #'gptel-request
+               prompt
+               (append
+                (list :callback
+                      (lambda (resp info)
+                        (ignore info)
+                        (let ((out (string-trim (or resp ""))))
+                          (funcall (magpt-task-render-fn task) out data)
+                          (when (magpt-task-apply-fn task)
+                            (funcall (magpt-task-apply-fn task) out data))))))
+               (when magpt-stream-output (list :stream t)))))))
+
+;;;###autoload
+(defun magpt-run-task (name &optional ctx)
+  "Interactively run a registered magpt task NAME. Experimental."
+  (interactive
+   (progn
+     (unless magpt-enable-task-registry
+       (user-error "Enable `magpt-enable-task-registry' to use experimental tasks"))
+     (list (intern (completing-read
+                    "magpt task: "
+                    (mapcar #'symbol-name (magpt--hash-table-keys magpt--tasks)))))))
+  (let ((task (gethash name magpt--tasks)))
+    (unless task (user-error "Unknown magpt task: %s" name))
+    (magpt--run-task task ctx)))
 
 (provide 'magpt)
 

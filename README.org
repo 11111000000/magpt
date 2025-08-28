@@ -107,6 +107,24 @@ Example configuration:
 (customize-set-variable 'magpt-project-root-strategy 'prefer-magit)
 #+end_src
 
+** Experimental (Phase 0)
+
+These features are optional and off by default. They harden the core without changing 1.0.0 behavior.
+
+- magpt-stream-output (default: nil)
+  - If non-nil, requests streaming mode from gptel when supported. Insertion semantics remain unchanged.
+- magpt-progress-spinner (default: nil)
+  - If non-nil, animates the commit buffer overlay while waiting for the model. Overlay teardown is unified and robust.
+- Experimental task registry (magpt-enable-task-registry, default: nil)
+  - Provides a generic task runner API (context → prompt → request → render/apply).
+  - To use interactive task launcher: set magpt-enable-task-registry to t, then M-x magpt-run-task.
+  - When disabled, nothing is bound or invoked automatically.
+
+Acceptance criteria for Phase 0:
+- Reversibility: default behavior unchanged; new infra is behind flags.
+- Observability: clear messages in *Messages*, stable overlay cleanup on errors/empty responses.
+- Tests cover: UTF‑8 truncation bounds, commit comment boundaries, and empty model responses.
+
 ** How It Works
 
 1. Diff extraction

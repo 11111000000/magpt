@@ -1,44 +1,49 @@
-* MaGPT 1.2.0
+* MaGPT — Universal, Safe Git/Magit AI Assistant for Emacs
 :PROPERTIES:
-:DESCRIPTION: AI commit messages for Git in Emacs via gptel, with optional Magit integration.
+:DESCRIPTION: Modular and extensible AI assistant for Git in Emacs. Provider-agnostic, safety-first, designed for workflow quality and future evolution. Powered by gptel.
 :END:
 
-** magpt.el — AI Commit Messages for Git in Emacs
+** Vision
 
-MaGPT (magpt.el) is an Emacs package that generates high‑quality Git commit messages from the diff of your staged changes. It talks to LLMs via gptel and integrates nicely with Magit, while remaining usable with plain Git/VC/project.el.
+MaGPT is an evolving Emacs package providing a universal AI assistant for working with Git repositories—especially via Magit. Starting as a best-of-breed commit message generator, it now introduces an extensible, task-oriented architecture for every phase of the Git workflow: status explanation, commit authoring, intent-based staging, branch naming, conflict mediation, histories, summaries, and safe previews of automated changes.
 
-- Provider‑agnostic: no hardcoded model; inherits your gptel default by default.
-- Safe defaults: confirmation before sending diffs, transparent truncation, comments preserved.
-- Smooth UX: overlay while generating; inserts at the top of commit buffer; async and non-blocking.
+MaGPT is designed for:
+- Clear, safe, reversible interactions at every step.
+- Strict privacy-by-default: explicit user confirmation and minimal, maskable context.
+- Smooth integration with Emacs, Magit, and gptel, without imposing new bindings or modes.
+- Future growth via a clean task registry and plugin system—ready for new workflows as AI and Emacs communities evolve.
+
+See [[#future-roadmap][Future roadmap]] for upcoming phases and philosophy details.
 
 ** Features
 
-- Generate clear, Conventional‑Commit‑friendly messages from your staged diff.
-- Uses gptel to access local or remote LLMs (OpenAI, Ollama, etc).
-- Optional Magit integration: open commit buffer and autofill in one command.
-- Provider/model agnostic (defaults to gptel’s current model; can be customized).
-- Preserves git‑commit comments and structure; inserts message at the top only.
-- Accurate comment detection using git-commit-mode’s configured comment char.
-- Diff truncation by UTF‑8 bytes with correctness guarantees.
-- Confirmation prompt shows original/sent byte sizes before uploading the diff.
-- Async requests with a visible overlay (“Message generation...”) and clean teardown on errors.
+- High‑quality, Conventional Commit–friendly message generation from the staged diff.
+- Status explanation, commit lint/fix, and branch name suggestion—all as safe, preview-only AI tasks.
+- Structured, provider‑agnostic API via gptel: supports OpenAI, Ollama (local), and more.
+- Magit integration: buttons and menu entries are /additional/ (never break defaults).
+- Privacy & control: every data send and change is confirmed; secrets can be masked.
+- Async, non-blocking UX: overlays/progress in commit buffers; panel buffer for interaction history.
+- Extensible, modular core: easy addition of new tasks (patches, changelogs, rebase/todos, conflict resolution).
+- Per-project =.magptrc= support for customizable language, prompts, and defaults.
+- Robust test suite: UTF-8 truncation, comment boundary detection, insertion logic, JSON validation.
 
-** Requirements
+** Principles
 
-- Emacs 28.1+
-- gptel 0.9+ (backend/provider configuration required)
-- Magit (optional, recommended for best UX)
+- Minimal, composable task units: context gathering, prompt building, result rendering, and (optionally) applying.
+- Always preview; never mutate repo state without dry-run, diff, and user confirmation.
+- Only augment existing Magit/VC/project flows—no invasive hooks or rebindings.
+- Local-first, cloud-optional: never leak content unless you choose to; masking is encouraged.
 
 ** Installation
 
-Clone or place magpt.el into your load-path and require it:
+Clone or place =magpt.el= into your =load-path= and require it:
 
 #+begin_src emacs-lisp
 (add-to-list 'load-path "/path/to/magpt/")
 (require 'magpt)
 #+end_src
 
-With use-package (straight.el example):
+Example (using use-package and straight.el):
 
 #+begin_src emacs-lisp
 (straight-use-package '(magpt :type git :host github :repo "11111000000/magpt"))
@@ -46,195 +51,172 @@ With use-package (straight.el example):
   :after gptel
   :commands (magpt-generate-commit-message magpt-commit-staged)
   :init
-  ;; Optional: integrate with Magit transient (adds "i" in magit-commit popup)
-  (magpt-mode 1))
+  (magpt-mode 1)) ; Optional: integrate "Commit with AI message" into Magit transient menus
 #+end_src
 
-MELPA (once accepted) will allow the usual M-x package-install flow.
+MELPA support is planned for the stable release cycle.
 
 ** Quickstart
 
-1. Stage your changes (git add ... or via Magit).
-2. Open a commit buffer (Magit: C then c; or start a normal Git commit).
+1. Stage changes (e.g. via Magit or =git add=).
+2. Open a commit buffer (Magit: =C= then =c=).
 3. Generate:
-   - In a commit buffer: M-x magpt-generate-commit-message
-   - Or open+fill in one go with Magit: M-x magpt-commit-staged
-4. Confirm sending the diff when prompted (shows bytes; notes truncation if any).
-5. Review the inserted message at the top of the commit buffer, tweak if needed, then C-c C-c.
+   - In commit buffer: =M-x magpt-generate-commit-message=
+   - Or open+fill in one go: =M-x magpt-commit-staged=
+4. Confirm sending the diff (see byte size/safety preview).
+5. Review the suggested message at the top, edit if needed, then =C-c C-c= to commit.
+6. Explore new safe tasks via =M-x magpt-show-panel= and related commands.
 
-If no commit buffer is available or insertion is disabled, the result appears in a read-only buffer named *magpt-commit* and is copied to your kill-ring.
+** Example Scenario: Calm Precision, Full Transparency
+
+- Open Magit Status (=M-x magit-status=).
+- Press =e= for "Explain status": get a concise overview and risk assessment.
+- Use "Stage by intent": magpt suggests logical groups for staging, which you can review and approve.
+- Ask for a "Commit with AI message": always confirm what will be sent; message appears in context but is never forced.
+- If conflict arises, "Explain conflict" and "Propose resolution patch" will appear—with dry-run diffs and complete control.
+- The magpt panel buffer tracks all requests and responses for later review.
+- Nothing is pushed or merged without your awareness—no side effects, ever.
 
 ** Commands
 
-- magpt-generate-commit-message
-  - Generate a message from the staged diff and insert it into an existing commit buffer (or show in *magpt-commit*).
-- magpt-commit-staged
-  - Requires Magit. Opens a commit buffer and generates/inserts the message automatically.
-- magpt-mode (global minor mode)
-  - When enabled, adds an “[i] Commit with AI message (magpt)” entry to Magit’s commit transient.
+- =magpt-generate-commit-message=: Message from staged diff, into commit buffer or dedicated result buffer.
+- =magpt-commit-staged=: (With Magit) Open commit buffer and auto-fill message.
+- =magpt-mode=: Optional global minor mode; adds "[i] Commit with AI message" to Magit commit menu.
+- Experimental, task-oriented safer commands (enable with =magpt-enable-task-registry=):
+    - =magpt-explain-status=
+    - =magpt-commit-lint-suggest=
+    - =magpt-branch-name-suggest=
+    - =magpt-show-panel=
+    - =magpt-run-task= (for all registered/more experimental tasks)
 
 ** Customization
 
-All options live under M-x customize-group RET magpt RET.
+All options are under =M-x customize-group RET magpt RET= or via =.magptrc= file for project-specific preference.
 
-- magpt-model (default: nil)
-  - LLM model name for gptel. When nil, uses gptel’s current default model/provider.
-- magpt-commit-prompt
-  - Prompt template appended with the diff; tuned for Conventional Commits.
-- magpt-max-diff-bytes (default: 200000)
-  - Max bytes of diff to include; nil disables limit. Truncation respects UTF‑8 boundaries.
-- magpt-insert-into-commit-buffer (default: t)
-  - If t and a commit buffer exists, insert there; otherwise show in *magpt-commit*.
-- magpt-project-root-strategy (default: prefer-magit)
-  - How to find the repo root: prefer-magit | prefer-vc | prefer-project.
-- magpt-diff-args (default: '("--staged" "--no-color"))
-  - Extra args for git diff when building the staged diff.
-- magpt-confirm-before-send (default: t)
-  - Ask for confirmation before sending the diff; shows original/sent sizes, mentions truncation.
-- magpt-commit-overlay-text (default: "Message generation...")
-  - Text shown as an overlay during async generation.
+Key variables:
+- =magpt-model=: LLM model name; supports gptel's provider auto-detection.
+- =magpt-commit-prompt=: Prompt template; can be language-specific or project-local.
+- =magpt-max-diff-bytes=: Max bytes to send for commit generation.
+- =magpt-confirm-before-send=: Confirm before uploading content (shows original and send sizes; warns of truncation).
+- =magpt-commit-overlay-text=: Overlay display string in commit buffer (can be localized).
+- =magpt-project-root-strategy=: How to find repo root (Magit/VC/project.el).
+- =magpt-enable-task-registry=: Enable experimental, extensible AI task pipeline and Panel UI.
 
-Faces:
-- magpt-commit-overlay-face
-  - Face for the overlay line in the commit buffer.
+Other customization includes provider selection (see next section), language, and per-task options via the registry.
 
-Example configuration:
+** Provider setup (via gptel)
 
-#+begin_src emacs-lisp
-(customize-set-variable 'magpt-model nil) ;; inherit from gptel
-(customize-set-variable 'magpt-max-diff-bytes 200000)
-(customize-set-variable 'magpt-confirm-before-send t)
-(customize-set-variable 'magpt-project-root-strategy 'prefer-magit)
-#+end_src
-
-** Experimental (Phase 0)
-
-These features are optional and off by default. They harden the core without changing 1.0.0 behavior.
-
-- magpt-stream-output (default: nil)
-  - If non-nil, requests streaming mode from gptel when supported. Insertion semantics remain unchanged.
-- magpt-progress-spinner (default: nil)
-  - If non-nil, animates the commit buffer overlay while waiting for the model. Overlay teardown is unified and robust.
-- Experimental task registry (magpt-enable-task-registry, default: nil)
-  - Provides a generic task runner API (context → prompt → request → render/apply).
-  - To use interactive task launcher: set magpt-enable-task-registry to t, then M-x magpt-run-task.
-  - When disabled, nothing is bound or invoked automatically.
-
-Acceptance criteria for Phase 0:
-- Reversibility: default behavior unchanged; new infra is behind flags.
-- Observability: clear messages in *Messages*, stable overlay cleanup on errors/empty responses.
-- Tests cover: UTF‑8 truncation bounds, commit comment boundaries, and empty model responses.
-
-** Assist (Phase 1, experimental)
-
-Read-only tasks that observe and suggest, without mutating the repo. Results are shown in a unified panel buffer (*magpt-panel*) with history. “Insert/Apply” controls are shown but disabled in this phase.
-
-- Enabling
-  - Customize: M-x customize-variable RET magpt-enable-task-registry RET → t
-  - Panel auto-pop on each task: M-x customize-variable RET magpt-panel-auto-pop RET
-
-- New interactive commands
-  - M-x magpt-explain-status
-    - Sends git status --porcelain to the model and returns JSON:
-      { summary, risks[], suggestions[] (title, commands[]) }.
-    - Renders JSON in *magpt-panel* and attempts basic JSON validation.
-  - M-x magpt-commit-lint-suggest
-    - Uses current commit buffer’s message (top section) and staged diff.
-    - Returns JSON: { status: ok|issues, issues[], suggestion{ replace, message } }.
-    - Renders JSON in *magpt-panel* (no automatic changes to the message).
-  - M-x magpt-branch-name-suggest
-    - Uses changed paths from porcelain status.
-    - Returns JSON: { name, alternatives[], rationale }.
-    - Renders JSON in *magpt-panel*.
-  - M-x magpt-show-panel
-    - Opens the *magpt-panel* buffer to review task history for the current repository.
-
-- Notes
-  - All tasks prompt for confirmation (shows bytes to be sent).
-  - Empty context behavior: if the collected context is empty (e.g., clean working tree), magpt skips the LLM request and records a panel entry. You can override this via `magpt-send-on-empty-context`.
-  - No mutations: results are text/JSON only; “Insert/Apply” remain disabled.
-  - Local LLMs are recommended by default (via gptel); cloud providers require explicit setup.
-
-** How It Works
-
-1. Diff extraction
-   - Finds the repo root via Magit/VC/project.el fallbacks.
-   - Retrieves the staged diff (git diff --staged --no-color plus custom args).
-2. Size control
-   - Optionally truncates the diff by UTF‑8 bytes (binary search; safe boundaries).
-   - Confirmation prompt indicates original vs sent sizes.
-3. Prompting
-   - Builds a prompt from your template + BEGIN/END DIFF markers (notes truncation).
-   - Sends async via gptel, with the commit buffer set as context to manage overlay lifecycle.
-4. Insertion
-   - If a commit buffer is available and insertion is enabled, inserts at the top only.
-   - Preserves the bottom “comments” section accurately using git-commit-mode’s comment char and section detection.
-   - Otherwise, shows the result in *magpt-commit* and copies it to the kill-ring.
-
-** Example Prompt (Default)
-
-#+begin_example
-You are an assistant that writes high-quality Git commit messages.
-Requirements:
-- Use Conventional Commits types when applicable (feat, fix, docs, refactor, test, chore, perf, build, ci).
-- First line: concise summary <= 72 chars.
-- Optional body: wrap at ~72 chars per line; explain motivation, context, and impact.
-- Use imperative mood; do not include ticket/issue references unless present in diff.
-- If the diff is empty or unclear, say 'chore: update' with a brief rationale.
-Provide the final commit message only, no extra commentary.
-#+end_example
-
-** Provider setup (gptel)
-
-Configure gptel for your provider (sketch):
-
-- OpenAI-compatible:
+- *OpenAI:*
   #+begin_src emacs-lisp
   (setq gptel-api-key (getenv "OPENAI_API_KEY"))
-  ;; Optionally: (setq gptel-backend (gptel-make-openai ...))
   #+end_src
 
-- Ollama (local):
+- *Ollama/local:*
   #+begin_src emacs-lisp
   (require 'gptel)
   (setq gptel-backend (gptel-make-ollama "ollama" :host "localhost:11434"))
-  ;; Pick a local model via M-x gptel-set-model or set magpt-model to "llama3" etc.
+  ;; Set magpt-model to your local model's name (e.g., "llama3")
   #+end_src
 
-You can set magpt-model to override gptel’s default for magpt requests, or keep it nil.
+If =magpt-model= is =nil=, inherits gptel's setting.
+
+** Per-project configuration: =.magptrc=
+
+=.magptrc= at your project root overrides any user options—using safe, explicit =(VARIABLE . VALUE)= Emacs Lisp alist. Example:
+
+#+begin_src emacs-lisp
+'(
+  (magpt-info-language . "Русский")
+  (magpt-commit-language . "English")
+  (magpt-panel-auto-pop . t)
+  (magpt-enable-task-registry . t)
+  (magpt-model . "gpt-4.1-mini"))
+#+end_src
+
+** Magpt Panel: Workflow Transparency
+
+The panel (=*magpt-panel*=) logs all AI tasks: requests, responses, JSON validity, notes and a safety audit. You can review what was sent/received, with schema hints and suggested actions (“Insert” and “Apply” are only enabled when it is safe).
+
+** Security and Privacy
+
+- User must always confirm what will be sent (both content and byte size); shows if truncation occurred.
+- Secrets (tokens, keys) are never sent automatically; future versions will mask patterns.
+- By default, no cloud provider; local LLMs (e.g. Ollama) are safest.
+- No irreversible git operations are performed: all changes are previewed, dry-run, and confirmed.
+
+** Extending MaGPT
+
+MaGPT’s task registry makes it simple to add new “tasks”:
+- Each task specifies:
+  - Context function: gathers just enough from git or Emacs.
+  - Prompt builder: formats, marks, imposes output schema.
+  - Renderer: shows in =*magpt-panel*=, commit buffer, or as a diff/patch.
+  - (Optionally) Safe apply function: always dry-run with explicit user validation.
+- Adding a new task:
+  1. Write context, prompt, render, (optionally apply) code in Lisp.
+  2. Register with =magpt-register-task=.
+  3. Instantly available via =magpt-run-task=.
+- See code for examples.
+
+** Task Examples (Current & Planned)
+
+- *Observe:* Explain repository status, status by file/hunk, staged changes, risk summary, history summarization.
+- *Suggest:* Commit message from diff, branch names, PR/MR summaries, lint/fixups, intent-based staging groups.
+- *Recommend & Preview:* Group and preview staging actions, minimal patch suggestions for hunks, safe rebase plans.
+- *Resolve & Mediate:* Explain merge conflicts; propose minimal resolution patches with diff previews (never auto-merge).
+- *Release/Document:* Generate changelogs, release notes; PR/MR templates from history.
+- *Search/Orient:* Planned: answer questions about code (“Q&A”) strictly on samples, respecting privacy.
+
+** Roadmap & Release Plan
+
+See [[#future-roadmap][Future roadmap]] for the envisioned “Observe” ➔ “Recommend” ➔ “Resolve” ➔ “Release” cycle (“crossing the river gently”).
+
+** [[#future-roadmap][Future roadmap]]
+
+- *Phase 0 ("Foundation Hardening")*
+  - Robustify core pipeline and overlay UX, add mandatory test harness, build project task registry, stabilize overlays/logs.
+  - /Exit criteria: no change in observable default behavior; new features are opt-in and reversible./
+
+- *Phase 1 ("Observe")*
+  - Status explain, commit lint/fix, branch name suggest as /read-only/, with all results in the panel and no mutations.
+  - /Exit criteria: all workflows are preview-only, with clear user review and no changes to repo state./
+
+- *Phase 2 ("Recommend")*
+  - Explain hunk/region, suggest stage-by-intent groups, range/PR summary.
+  - Safe, atomic “apply” for naturally-reversible operations (stage/unstage).
+  - /Exit criteria: nothing changes repo unless user explicitly confirms per action./
+
+- *Phase 3 ("Resolve")*
+  - Explain conflict with patch suggest (ediff/dry-run), safe rebase plan preview.
+  - All actions are explicit, dry-run only, cancelable at any time.
+
+- *Phase 4+ ("Release/Extend")*
+  - Live changelog/release notes, PR/MR templates (text only), telemetry (local).
+  - RAG/code search is future interest, gated by privacy and clear use.
+
+** Test Practices
+
+- ERT-based suite: UTF-8 truncation, insertion, overlay teardown, JSON detection.
+- Property tests for safety gates and text boundary detection.
+- No dependency on LLM at test time: gptel is stubbed/mocked for portable CI.
 
 ** Tips
 
-- Best results when run inside an open commit buffer (git-commit-mode), so the message drops in place.
-- If you already typed a message, magpt will ask permission before replacing it (comments are preserved).
-- Large repos: consider increasing magpt-max-diff-bytes or curating staged changes to focus on one logical change.
+- Keep =magpt-enable-task-registry= off for pure commit message generation (as in v1.0.x).
+- Only enable experimental tasks/project features (=magpt-enable-task-registry=, etc.) one-by-one per your workflow needs.
+- Review =*magpt-panel*= to understand exactly what goes to and comes from the LLM.
+- Prefer local models while evaluating.
 
 ** Troubleshooting
 
-- “No Git repository found”
-  - Ensure you’re inside a Git project; check magpt-project-root-strategy.
-- “No staged changes found”
-  - Stage changes first (git add ... or via Magit).
-- “Empty response from model”
-  - Check gptel backend, API key, or try a different model.
-- “Overlay stuck”
-  - Errors are reported in *Messages*. Overlay should auto-clear on error; if not, re-run or close/reopen the commit buffer.
-- Output not inserted
-  - If no commit buffer is available (or magpt-insert-into-commit-buffer is nil), result goes to *magpt-commit* and the kill-ring.
-
-** Privacy and Security
-
-- magpt-confirm-before-send defaults to t. Review sizes and confirm before uploading diffs to a provider.
-- Sensitive data: if it’s staged, it may be sent. Consider splitting commits or removing secrets before staging.
-- Local providers (e.g., Ollama) keep data on your machine.
-
-** What’s new in 1.0.0
-
-- Default model is nil (inherit from gptel); provider-agnostic by default.
-- Confirmation before sending (shows original/sent bytes; notes truncation).
-- Improved commit buffer handling: robust detection/preservation of git-commit comments.
-- Unified callback/overlay handling; cleaner and more predictable UX.
-- Small internal cleanups and safer project root detection.
+- “No staged changes found”?
+  - Stage them via Magit or =git add=.
+- “Commit message not inserted”?
+  - If no commit buffer, result is shown in /magpt-commit/ (copied to kill-ring).
+- “Model responds slowly/empty”?
+  - Try a different gptel backend or review provider logs.
+- “Overlay stuck”?
+  - Should self-clean; try clearing commit buffer or re-opening.
 
 ** License
 
@@ -242,7 +224,14 @@ MIT. See [[file:LICENSE][LICENSE]].
 
 ** Links
 
-- Repo: https://github.com/11111000000/magpt
+- Source: https://github.com/11111000000/magpt
 - gptel: https://github.com/karthink/gptel
 - Magit: https://magit.vc/
 
+** Future Plans: Philosophy of Improvement
+
+MaGPT aspires to be like water—gentle, adaptive, never disruptive. Every new feature is introduced as a previewed, additive “stone in the river,” reversible and observable, avoiding any loss of control. See the [dialectical and Dao analysis](magpt-analyse.org) and inspirational narrative in the source repository for more on the development philosophy.
+
+---
+
+With MaGPT, you keep full power and clarity of Magit—AI only assists where it saves your time, never at the cost of safety or control. Every step is confirmed, and all magic is carefully, openly demystified. Enjoy your steady crossing!

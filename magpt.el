@@ -433,7 +433,10 @@ the result to *Messages*."
 ;;;###autoload
 (defun magpt-commit-staged ()
   "Start a Magit commit and insert a generated message for staged changes.
-Opens a commit message buffer, inserts the generated text, and allows the user to
+If already in a commit message buffer, reuse the current buffer instead of opening a new one.
+The generated message will be inserted into that buffer even if you switch windows while waiting.
+
+Opens a commit message buffer when needed, inserts the generated text, and allows the user to
 complete the commit with the standard C-c C-c command. This command does not
 actually perform the commit.
 
@@ -463,32 +466,47 @@ Requires Magit to be installed."
              (diff (car trunc))
              (truncatedp (cdr trunc))
              (prompt (magpt--build-commit-prompt magpt-commit-prompt diff truncatedp))
-             (target-buf nil))
-        ;; Открываем commit-буфер Magit и ждём, пока он появится.
-        (condition-case err
+             (target-buf (and (magpt--commit-buffer-p) (current-buffer))))
+        (if (and target-buf (buffer-live-p target-buf))
+            ;; Уже в commit-буфере: сразу показываем overlay и запускаем генерацию.
             (progn
-              (magit-commit-create '())
-              ;; Подождать немного, чтобы буфер появился и стал текущим.
-              (let ((tries 0))
-                (while (and (null target-buf) (< tries 50))
-                  (setq target-buf (or (and (magpt--commit-buffer-p) (current-buffer))
-                                       (magpt--find-commit-buffer)))
-                  (unless target-buf (sit-for 0.01))
-                  (setq tries (1+ tries)))))
-          (error
-           (message "magpt: could not open Magit commit buffer: %s" (error-message-string err))))
-        ;; Если буфер не открылся, тихо выходим (без бросания ошибки внутри transient-контекста).
-        (if (not (and target-buf (buffer-live-p target-buf)))
-            (message "magpt: Magit did not open a commit buffer (possibly canceled or aborted). Aborting message generation.")
-          ;; Показываем overlay и отправляем запрос в LLM.
-          (magpt--show-commit-overlay target-buf)
-          (message "magpt: requesting LLM to generate commit message...")
-          (condition-case err
-              (let ((gptel-model (or magpt-model gptel-model)))
-                (gptel-request prompt :context target-buf :callback #'magpt--commit-callback))
-            (error
-             (magpt--remove-commit-overlay target-buf)
-             (message "magpt: error calling gptel: %s" (error-message-string err)))))))))
+              (magpt--show-commit-overlay target-buf)
+              (message "magpt: requesting LLM to generate commit message...")
+              (condition-case err
+                  (let ((gptel-model (or magpt-model gptel-model)))
+                    (gptel-request prompt :context target-buf :callback #'magpt--commit-callback))
+                (error
+                 (magpt--remove-commit-overlay target-buf)
+                 (message "magpt: error calling gptel: %s" (error-message-string err)))))
+          ;; Иначе: ждём открытия окна/буфера с помощью git-commit-setup-hook и запускаем генерацию после его подготовки.
+          (let (hook-fn remove-timer)
+            (setq hook-fn
+                  (lambda ()
+                    ;; Одноразовый хук — сразу снимаем.
+                    (when (timerp remove-timer) (cancel-timer remove-timer))
+                    (remove-hook 'git-commit-setup-hook hook-fn)
+                    (let ((buf (current-buffer)))
+                      (when (magpt--commit-buffer-p buf)
+                        (magpt--show-commit-overlay buf)
+                        (message "magpt: requesting LLM to generate commit message...")
+                        (condition-case err
+                            (let ((gptel-model (or magpt-model gptel-model)))
+                              (gptel-request prompt :context buf :callback #'magpt--commit-callback))
+                          (error
+                           (magpt--remove-commit-overlay buf)
+                           (message "magpt: error calling gptel: %s" (error-message-string err))))))))
+            (add-hook 'git-commit-setup-hook hook-fn)
+            ;; На случай отмены коммита — очистим хук через таймаут.
+            (setq remove-timer
+                  (run-at-time 20 nil
+                               (lambda ()
+                                 (remove-hook 'git-commit-setup-hook hook-fn))))
+            (condition-case err
+                (magit-commit-create '())
+              (error
+               (when (timerp remove-timer) (cancel-timer remove-timer))
+               (remove-hook 'git-commit-setup-hook hook-fn)
+               (message "magpt: could not open Magit commit buffer: %s" (error-message-string err))))))))))
 
 (provide 'magpt)
 

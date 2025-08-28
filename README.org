@@ -83,6 +83,7 @@ MELPA support is planned for the stable release cycle.
 - =magpt-commit-staged=: (With Magit) Open commit buffer and auto-fill message.
 - =magpt-mode=: Optional global minor mode; adds "[i] Commit with AI message" to Magit commit menu.
   Also adds the following entries to =magit-dispatch= (when enabled):
+  - =e=: Explain status (magpt)
   - =E=: Explain hunk/region (magpt)
   - =S=: Stage by intent (magpt)
   - =A=: Apply last stage-by-intent (magpt)
@@ -96,6 +97,8 @@ MELPA support is planned for the stable release cycle.
     - =magpt-explain-hunk-region= (Phase 2, read-only: explain selected region or current hunk)
     - =magpt-stage-by-intent=, =magpt-stage-by-intent-apply-last= (Phase 2: suggest groups; Apply limited to whole-file stage/unstage)
     - =magpt-range-summary= (Phase 2: PR/MR summary from a commit range; text only)
+    - =magpt-stage-by-intent-hunks= (Phase 2: hunk-level via unified diff; preview; safe apply to index after =git apply --cached --check=)
+    - =magpt-resolve-conflict-here= (Phase 3: conflict explanation + minimal patch suggestion; preview and =git apply --check= only)
 
 ** Customization
 
@@ -145,7 +148,15 @@ If =magpt-model= is =nil=, inherits gptel's setting.
 
 ** Magpt Panel: Workflow Transparency
 
-The panel (=*magpt-panel*=) logs all AI tasks: requests, responses, JSON validity, notes and a safety audit. You can review what was sent/received, with schema hints and suggested actions (“Insert” and “Apply” are only enabled when it is safe).
+The panel (=*magpt-panel*=) logs all AI tasks: requests, responses, JSON validity, notes and a safety audit. You can review exactly what was sent/received, with schema hints and contextual actions.
+- Dynamic “Actions” line indicates when “Apply” is available (only for safe, reversible ops).
+- Panel buttons:
+  - [Copy], [JSON] — available for any entry (copy response; open in JSON buffer and pretty-print if valid).
+  - [Apply] — for =stage-by-intent= plans (file-level =git add=/=git restore --staged= only, with confirmation).
+  - [Open patch], [Check patch], [Apply to index] — for patch-based tasks (e.g., =stage-by-intent-hunks=); validation via =git apply --check= and optional safe apply via =git apply --cached=, always with confirm.
+- Keybindings in the panel (=magpt-panel-mode=):
+  - c — copy current entry’s response to the kill-ring
+  - j — open current entry’s response in a JSON buffer (pretty-printed when valid)
 
 ** Security and Privacy
 
@@ -153,6 +164,9 @@ The panel (=*magpt-panel*=) logs all AI tasks: requests, responses, JSON validit
 - Secrets (tokens, keys) are never sent automatically; future versions will mask patterns.
 - By default, no cloud provider; local LLMs (e.g. Ollama) are safest.
 - No irreversible git operations are performed: all changes are previewed, dry-run, and confirmed.
+- Apply operations:
+  - File-level staging uses only =git add= and =git restore --staged= (reversible).
+  - Patch-based tasks use =git apply --check= for validation and optional =git apply --cached= (index-only), always with explicit preview and confirmation.
 
 ** Extending MaGPT
 

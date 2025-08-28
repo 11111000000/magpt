@@ -305,6 +305,49 @@ Heuristics:
                 ?#)))
     (format "^%c.*$" c)))
 
+(defun magpt--commit-comment-char ()
+  "Return the comment character used by git-commit, or fallback '#'."
+  (or (and (boundp 'git-commit-comment-char) git-commit-comment-char)
+      (and (boundp 'comment-start)
+           (stringp comment-start)
+           (> (length comment-start) 0)
+           (aref comment-start 0))
+      ?#))
+
+(defun magpt--commit-message-boundaries ()
+  "Return a cons (MSG-END . COMMENTS-BEG) for current commit buffer.
+Detects a trailing comments block (preceded by a blank line) that consists only
+of comment lines or blank lines until end of buffer. If found, MSG-END is the
+buffer position before that block; otherwise MSG-END is `point-max'."
+  (save-excursion
+    (goto-char (point-min))
+    (let* ((c (magpt--commit-comment-char))
+           (rx (format "^%c" c))
+           (cand nil)
+           pos)
+      (while (and (not cand)
+                  (setq pos (re-search-forward rx nil t)))
+        (let ((bol (match-beginning 0)))
+          ;; Require a blank line (or BOB) before the comments block candidate.
+          (when (save-excursion
+                  (goto-char bol)
+                  (forward-line -1)
+                  (or (bobp) (looking-at-p "^[ \t]*$")))
+            ;; Verify: from BOL to EOB only comment lines or blanks.
+            (let ((ok t))
+              (save-excursion
+                (goto-char bol)
+                (while (and ok (not (eobp)))
+                  (cond
+                   ((looking-at-p rx))          ; comment line
+                   ((looking-at-p "^[ \t]*$"))  ; blank line
+                   (t (setq ok nil)))
+                  (forward-line 1)))
+              (when ok (setq cand bol))))))
+      (if cand
+          (cons cand cand)
+        (cons (point-max) nil)))))
+
 (defun magpt--insert-into-commit-buffer (text)
   "Insert TEXT into the commit message buffer, asking for confirmation if needed.
 Preserves comment lines at the bottom. Inserts the generated message at the top.
@@ -374,16 +417,13 @@ Inserts the generated message at the top. Returns t if insertion is performed; n
   (when (and (buffer-live-p buf))
     (with-current-buffer buf
       (when (magpt--commit-buffer-p)
-        (let* ((comment-pos (save-excursion
-                              (goto-char (point-min))
-                              (when (re-search-forward (magpt--comment-line-regexp) nil t)
-                                (match-beginning 0))))
-               (msg-end (or comment-pos (point-max)))
+        (let* ((bounds (magpt--commit-message-boundaries))
+               (msg-end (car bounds))
                (existing (string-trim (buffer-substring-no-properties (point-min) msg-end))))
           (when (or (string-empty-p existing)
                     (y-or-n-p "Replace the current commit message and insert the generated one? "))
             (let ((inhibit-read-only t))
-              ;; Only remove the current message (up to comments), keep comments.
+              ;; Only remove the current message (up to comments), keep comments section intact.
               (delete-region (point-min) msg-end)
               (goto-char (point-min))
               (insert (string-trim-right text) "\n")

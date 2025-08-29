@@ -148,15 +148,35 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
   :type 'string
   :group 'magpt)
 
-(defvar magpt--rc-state nil
+(defcustom magpt-user-rc-file (expand-file-name "~/.magptrc")
+  "Path to user-level magpt RC file. Loaded before project RC; project overrides."
+  :type '(choice (const :tag "Disabled" nil)
+                 (file :tag "RC file path"))
+  :group 'magpt)
+
+(defvar magpt--user-rc-state nil
+  "Internal cache of user rc: plist (:path PATH :mtime TIME :data ALIST).")
+
+(defvar magpt--proj-rc-state nil
   "Internal cache of project rc: plist (:path PATH :mtime TIME :data ALIST).")
 
-(defun magpt--locate-rc ()
+(defun magpt--locate-project-rc ()
   "Return absolute path to project .magptrc if found; otherwise nil."
   (let ((root (ignore-errors (magpt--project-root))))
     (when root
       (let ((f (expand-file-name magpt-rc-file-name root)))
         (when (file-exists-p f) f)))))
+
+;; Backward-compat alias (older code may expect this name).
+(defun magpt--locate-rc ()
+  "Return absolute path to project .magptrc if found; otherwise nil."
+  (magpt--locate-project-rc))
+
+(defun magpt--locate-user-rc ()
+  "Return absolute path to user RC file if configured and exists; otherwise nil."
+  (when (and magpt-user-rc-file (stringp magpt-user-rc-file))
+    (let ((f (expand-file-name magpt-user-rc-file)))
+      (when (file-exists-p f) f))))
 
 (defun magpt--read-rc (file)
   "Read FILE and return an alist of (SYMBOL . VALUE). Ignores arbitrary code; supports quoted list."
@@ -187,25 +207,52 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
                       (boundp sym))
              (set sym v))))))))
 
-(defun magpt--maybe-load-rc ()
-  "Load and apply project .magptrc if present and changed."
-  (let ((f (magpt--locate-rc)))
+(defun magpt--maybe-load-user-rc ()
+  "Load and apply user RC (~/.magptrc) if present and changed."
+  (let ((f (magpt--locate-user-rc)))
     (when f
       (let* ((attr (file-attributes f))
              (mtime (when attr (file-attribute-modification-time attr))))
-        (when (or (null magpt--rc-state)
-                  (not (equal (plist-get magpt--rc-state :path) f))
-                  (not (equal (plist-get magpt--rc-state :mtime) mtime)))
+        (when (or (null magpt--user-rc-state)
+                  (not (equal (plist-get magpt--user-rc-state :path) f))
+                  (not (equal (plist-get magpt--user-rc-state :mtime) mtime)))
           (let ((alist (magpt--read-rc f)))
-            (setq magpt--rc-state (list :path f :mtime mtime :data alist))
+            (setq magpt--user-rc-state (list :path f :mtime mtime :data alist))
             (magpt--apply-rc alist)
-            (magpt--log "rc loaded: %s keys=%s"
+            (magpt--log "user rc loaded: %s keys=%s"
                         f (mapcar (lambda (kv)
                                     (cond
                                      ((consp kv) (symbol-name (car kv)))
                                      ((symbolp kv) (symbol-name kv))
                                      (t (format "%S" kv))))
                                   (or alist '())))))))))
+
+(defun magpt--maybe-load-project-rc ()
+  "Load and apply project .magptrc if present and changed."
+  (let ((f (magpt--locate-project-rc)))
+    (when f
+      (let* ((attr (file-attributes f))
+             (mtime (when attr (file-attribute-modification-time attr))))
+        (when (or (null magpt--proj-rc-state)
+                  (not (equal (plist-get magpt--proj-rc-state :path) f))
+                  (not (equal (plist-get magpt--proj-rc-state :mtime) mtime)))
+          (let ((alist (magpt--read-rc f)))
+            (setq magpt--proj-rc-state (list :path f :mtime mtime :data alist))
+            (magpt--apply-rc alist)
+            (magpt--log "project rc loaded: %s keys=%s"
+                        f (mapcar (lambda (kv)
+                                    (cond
+                                     ((consp kv) (symbol-name (car kv)))
+                                     ((symbolp kv) (symbol-name kv))
+                                     (t (format "%S" kv))))
+                                  (or alist '())))))))))
+
+(defun magpt--maybe-load-rc ()
+  "Load and apply user RC then project RC; project overrides user."
+  ;; Load user-level first to establish defaults.
+  (magpt--maybe-load-user-rc)
+  ;; Then load project-level, which takes precedence.
+  (magpt--maybe-load-project-rc))
 
 ;;;; Section: Logging and diagnostics
 ;;

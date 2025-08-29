@@ -252,10 +252,3 @@ MIT. See [[file:LICENSE][LICENSE]].
 - gptel: https://github.com/karthink/gptel
 - Magit: https://magit.vc/
 
-** Future Plans: Philosophy of Improvement
-
-MaGPT aspires to be like water—gentle, adaptive, never disruptive. Every new feature is introduced as a previewed, additive “stone in the river,” reversible and observable, avoiding any loss of control. See the [dialectical and Dao analysis](magpt-analyse.org) and inspirational narrative in the source repository for more on the development philosophy.
-
----
-
-With MaGPT, you keep full power and clarity of Magit—AI only assists where it saves your time, never at the cost of safety or control. Every step is confirmed, and all magic is carefully, openly demystified. Enjoy your steady crossing!

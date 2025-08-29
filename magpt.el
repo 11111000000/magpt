@@ -1089,6 +1089,9 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
   (let ((m (make-sparse-keymap)))
     (define-key m (kbd "c") #'magpt-panel-copy-response)
     (define-key m (kbd "j") #'magpt-panel-open-response-json)
+    (define-key m (kbd "n") #'magpt-panel-next-entry)
+    (define-key m (kbd "p") #'magpt-panel-previous-entry)
+    (define-key m (kbd "t") #'magpt-panel-toggle-pretty)
     m)
   "Keymap for `magpt-panel-mode'.")
 
@@ -1096,9 +1099,179 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
   "Minor mode for the MaGPT panel buffer.
 Keys:
   c — copy current entry response to kill-ring
-  j — open current entry response in JSON buffer (pretty-printed when valid)"
+  j — open current entry response in JSON buffer (pretty-printed when valid)
+  n/p — jump to next/previous entry
+  t — toggle pretty rendering for supported tasks (e.g., explain-status)"
   :init-value nil :lighter " magpt-panel" :keymap magpt-panel-mode-map
   (read-only-mode (if magpt-panel-mode 1 -1)))
+
+(defcustom magpt-panel-pretty-default t
+  "If non-nil, render supported tasks (like explain-status) in a structured, pretty form."
+  :type 'boolean
+  :group 'magpt)
+
+(defface magpt-panel-title-face
+  '((t :inherit mode-line-buffer-id :weight bold))
+  "Title face for panel entry header."
+  :group 'magpt)
+
+(defface magpt-badge-ok-face
+  '((t :inherit success))
+  "Badge face for OK/valid markers."
+  :group 'magpt)
+
+(defface magpt-badge-warn-face
+  '((t :inherit warning))
+  "Badge face for warnings/invalid markers."
+  :group 'magpt)
+
+(defface magpt-panel-section-face
+  '((t :weight bold))
+  "Section face for panel structured rendering (e.g., Summary/Risks/Suggestions)."
+  :group 'magpt)
+
+(defface magpt-panel-suggestion-face
+  '((t :inherit font-lock-function-name-face :weight bold))
+  "Face for suggestion titles in pretty rendering."
+  :group 'magpt)
+
+(defvar-local magpt--panel-pretty nil
+  "Buffer-local toggle for pretty rendering in panel.")
+
+(defun magpt--insert-badge (label face)
+  "Insert a bracketed LABEL with FACE."
+  (insert (propertize (format "[%s]" label) 'face face) " "))
+
+(defun magpt--panel-insert-header (entry)
+  "Insert a styled header for ENTRY with badges."
+  (let ((ts (plist-get entry :time))
+        (task (plist-get entry :task))
+        (valid (plist-get entry :valid)))
+    (insert (propertize (format "=== %s — %s ===\n" ts task)
+                        'face 'magpt-panel-title-face))
+    (magpt--insert-badge (if valid "JSON OK" "JSON?") (if valid 'magpt-badge-ok-face 'magpt-badge-warn-face))
+    (insert "\n")))
+
+(defun magpt--panel-parse-json-safe (entry)
+  "Parse ENTRY's :response as JSON; return alist or nil."
+  (let ((resp (plist-get entry :response)))
+    (condition-case _err
+        (json-parse-string (or resp "") :object-type 'alist :array-type 'list)
+      (error nil))))
+
+(defun magpt--btn-copy-summary (button)
+  "Copy explain-status summary."
+  (let* ((entry (button-get button 'magpt-entry))
+         (data (magpt--panel-parse-json-safe entry))
+         (sum (alist-get 'summary data)))
+    (when (stringp sum)
+      (kill-new sum)
+      (message "%s" (magpt--i18n 'panel-json-copied)))))
+
+(defun magpt--btn-copy-suggestion-commands (button)
+  "Copy commands for a suggestion."
+  (let* ((cmds (button-get button 'magpt-suggestion-commands)))
+    (when (stringp cmds)
+      (kill-new cmds)
+      (message "%s" (magpt--i18n 'panel-json-copied)))))
+
+(defun magpt--btn-preview-text (title text &optional mode)
+  "Open TEXT in a preview buffer with TITLE; MODE selects major-mode symbol."
+  (let ((buf (get-buffer-create "*magpt-preview*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (string-trim-right text) "\n")
+        (goto-char (point-min))
+        (cond
+         ((eq mode 'json) (when (fboundp 'json-mode) (ignore-errors (json-mode)))
+          (condition-case _ (when (fboundp 'json-pretty-print-buffer)
+                              (json-pretty-print-buffer))
+            (error nil)))
+         ((eq mode 'shell) (ignore-errors (sh-mode)))
+         (t (text-mode)))
+        (setq buffer-read-only t)))
+    (pop-to-buffer buf)
+    (rename-buffer (format "*magpt-preview: %s*" title) t)))
+
+(defun magpt--btn-preview-suggestion-commands (button)
+  "Preview commands for a suggestion in a read-only buffer."
+  (let* ((idx (button-get button 'magpt-suggestion-index))
+         (cmds (button-get button 'magpt-suggestion-commands)))
+    (magpt--btn-preview-text (format "Suggestion %s commands" (or idx "?"))
+                             cmds 'shell)))
+
+(defun magpt--panel-render-explain-status-pretty (entry)
+  "Pretty rendering for explain-status ENTRY: summary, risks, suggestions."
+  (let* ((note (or (plist-get entry :note) ""))
+         (data (magpt--panel-parse-json-safe entry))
+         (summary (and (alist-get 'summary data) (format "%s" (alist-get 'summary data))))
+         (risks (or (alist-get 'risks data) '()))
+         (sugs (or (alist-get 'suggestions data) '())))
+    (when (and (stringp note) (> (length note) 0))
+      (insert (format (concat (magpt--i18n 'panel-note) "\n") note)))
+    ;; Summary
+    (insert (propertize (format "%s\n" "Summary:") 'face 'magpt-panel-section-face))
+    (insert (or summary "(no summary)") "\n\n")
+    ;; Risks
+    (insert (propertize (format "%s\n" "Risks:") 'face 'magpt-panel-section-face))
+    (if (and (listp risks) (> (length risks) 0))
+        (dolist (r risks) (insert "  • " (format "%s" r) "\n"))
+      (insert "  • none\n"))
+    (insert "\n")
+    ;; Suggestions
+    (insert (propertize (format "%s\n" "Suggestions:") 'face 'magpt-panel-section-face))
+    (if (and (listp sugs) (> (length sugs) 0))
+        (cl-loop for s in sugs
+                 for i from 1 do
+                 (let* ((title (or (alist-get 'title s) (format "Suggestion %d" i)))
+                        (cmds  (mapconcat (lambda (c) (format "%s" c))
+                                          (or (alist-get 'commands s) '()) "\n")))
+                   (insert (propertize (format "%d) %s\n" i title) 'face 'magpt-panel-suggestion-face))
+                   (insert "    ")
+                   (make-text-button "[Copy cmds]" nil
+                                     'action #'magpt--btn-copy-suggestion-commands
+                                     'follow-link t
+                                     'help-echo "Copy suggested commands"
+                                     'magpt-entry entry
+                                     'magpt-suggestion-index i
+                                     'magpt-suggestion-commands cmds)
+                   (insert "  ")
+                   (make-text-button "[Preview cmds]" nil
+                                     'action #'magpt--btn-preview-suggestion-commands
+                                     'follow-link t
+                                     'help-echo "Preview suggested commands"
+                                     'magpt-entry entry
+                                     'magpt-suggestion-index i
+                                     'magpt-suggestion-commands cmds)
+                   (insert "\n")))
+      (insert "  (no suggestions)\n"))
+    (insert "\n")))
+
+(defun magpt-panel-toggle-pretty ()
+  "Toggle pretty rendering for supported tasks and refresh the panel."
+  (interactive)
+  (setq magpt--panel-pretty (not magpt--panel-pretty))
+  (magpt-show-panel))
+
+(defun magpt-panel-next-entry ()
+  "Move point to the start of the next panel entry."
+  (interactive)
+  (let ((pos (next-single-property-change (point) 'magpt-entry nil (point-max))))
+    (when (and pos (< pos (point-max)))
+      (goto-char pos)
+      (beginning-of-line))))
+
+(defun magpt-panel-previous-entry ()
+  "Move point to the start of the previous panel entry."
+  (interactive)
+  (let ((pos (previous-single-property-change (point) 'magpt-entry nil (point-min))))
+    (when (and pos (> pos (point-min)))
+      ;; Jump to the beginning of this entry (property becomes non-nil just after boundary)
+      (goto-char (1- pos))
+      (setq pos (previous-single-property-change (point) 'magpt-entry nil (point-min)))
+      (when pos (goto-char pos)))
+    (beginning-of-line)))
 
 (defun magpt--panel-entry-at-point ()
   "Return the panel ENTRY plist at point, or nil if none.
@@ -1321,29 +1494,38 @@ Relies on 'magpt-entry text property."
     (put-text-property start (point) 'read-only t)))
 
 (defun magpt--panel-buffer ()
-  "Return the panel buffer, rendering all entries."
+  "Return the panel buffer, rendering all entries (pretty when available)."
   (let ((buf (get-buffer-create magpt-panel-buffer-name)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (format "%s\n\n" (magpt--i18n 'panel-header)))
+        (unless (local-variable-p 'magpt--panel-pretty)
+          (setq-local magpt--panel-pretty magpt-panel-pretty-default))
         (dolist (e (reverse magpt--panel-entries))
           (let* ((start (point))
-                 (ts   (plist-get e :time))
                  (task (plist-get e :task))
                  (req  (plist-get e :request))
                  (resp (plist-get e :response))
-                 (valid (plist-get e :valid))
-                 (note (or (plist-get e :note) "")))
-            (insert (format "=== %s — %s ===\n" ts task))
-            (when (and (stringp note) (> (length note) 0))
-              (insert (format (concat (magpt--i18n 'panel-note) "\n") note)))
+                 (valid (plist-get e :valid)))
+            ;; Header with badges
+            (magpt--panel-insert-header e)
+            ;; Request preview (trimmed)
             (insert (format "%s\n%s\n\n"
                             (magpt--i18n 'panel-request)
                             (if (> (length req) 2000) (concat (substring req 0 2000) " …") req)))
-            (insert (magpt--i18n 'panel-response) "\n")
-            (insert (string-trim-right resp) "\n")
-            (insert (format "\n%s\n"
+            ;; Response
+            (cond
+             ((and magpt--panel-pretty
+                   (eq task 'explain-status)
+                   valid
+                   (magpt--panel-parse-json-safe e))
+              (magpt--panel-render-explain-status-pretty e))
+             (t
+              (insert (magpt--i18n 'panel-response) "\n")
+              (insert (string-trim-right resp) "\n\n")))
+            ;; Validity + actions
+            (insert (format "%s\n"
                             (format (magpt--i18n 'panel-valid)
                                     (if valid (magpt--i18n 'panel-yes) (magpt--i18n 'panel-no)))))
             (let ((actions (magpt--panel-actions-line e)))

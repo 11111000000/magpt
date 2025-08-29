@@ -954,7 +954,9 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
           (transient-append-suffix 'magit-dispatch "!"
             `("A" ,(magpt--transient-desc "Apply last stage-by-intent (magpt)") magpt-stage-by-intent-apply-last))
           (transient-append-suffix 'magit-dispatch "!"
-            `("R" ,(magpt--transient-desc "Range/PR summary (magpt)") magpt-range-summary))))
+            `("R" ,(magpt--transient-desc "Range/PR summary (magpt)") magpt-range-summary))
+          (transient-append-suffix 'magit-dispatch "!"
+            `("a" ,(magpt--transient-desc "AI actions (magpt)") magpt-ai-actions))))
     (with-eval-after-load 'magit
       (transient-remove-suffix 'magit-commit "i")
       (when (featurep 'transient)
@@ -962,7 +964,8 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
         (transient-remove-suffix 'magit-dispatch "E")
         (transient-remove-suffix 'magit-dispatch "S")
         (transient-remove-suffix 'magit-dispatch "A")
-        (transient-remove-suffix 'magit-dispatch "R")))))
+        (transient-remove-suffix 'magit-dispatch "R")
+        (transient-remove-suffix 'magit-dispatch "a")))))
 
 ;;;; Section: Task registry (experimental core abstraction)
 ;;
@@ -2167,6 +2170,108 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (interactive)
   (magpt--ensure-assist-ready)
   (magpt-run-task 'branch-name-suggest))
+
+;;;; Section: AI Actions transient (menus built from panel)
+;;
+;; Non-intrusive dynamic menu based on the latest `explain-status` entry in the Panel.
+;; No background LLM calls; explicit "g" runs the task.
+
+(defvar magpt--ai-actions-suggestions nil
+  "List of suggestion plists from the last explain-status: (:title STRING :commands STRING).")
+
+(defvar magpt--ai-actions-summary nil
+  "Summary string from the last explain-status, if available.")
+
+(defun magpt--ai-suggestions-from-last-explain-status ()
+  "Extract suggestions list and summary from the last 'explain-status' panel entry."
+  (let* ((e (magpt--panel-last-entry-for 'explain-status))
+         (data (and e (magpt--panel-parse-json-safe e))))
+    (when data
+      (let ((sugs (or (alist-get 'suggestions data) '()))
+            (summary (alist-get 'summary data)))
+        (setq magpt--ai-actions-summary (and (stringp summary) summary))
+        (mapcar (lambda (s)
+                  (let* ((title (or (alist-get 'title s) ""))
+                         (cmds  (mapconcat (lambda (c) (format "%s" c))
+                                           (or (alist-get 'commands s) '()) "\n")))
+                    (list :title title :commands cmds)))
+                sugs)))))
+
+(defun magpt--ai-actions-init ()
+  "Initialize AI actions state from panel."
+  (setq magpt--ai-actions-suggestions
+        (or (magpt--ai-suggestions-from-last-explain-status) '()))
+  (length magpt--ai-actions-suggestions))
+
+(defun magpt--ai-actions-choose-index ()
+  "Prompt for a suggestion index using completing-read."
+  (unless magpt--ai-actions-suggestions (magpt--ai-actions-init))
+  (let* ((titles (mapcar (lambda (it) (plist-get it :title))
+                         magpt--ai-actions-suggestions))
+         (choice (completing-read "Suggestion: " titles nil t)))
+    (cl-position choice titles :test #'string=)))
+
+(defun magpt-ai-actions-preview (&optional idx)
+  "Preview commands for a suggestion (open read-only buffer with shell-mode)."
+  (interactive)
+  (magpt--ai-actions-init)
+  (if (zerop (length magpt--ai-actions-suggestions))
+      (user-error "No suggestions found; run magpt-explain-status first")
+    (let* ((i (or idx (magpt--ai-actions-choose-index)))
+           (sug (nth i magpt--ai-actions-suggestions))
+           (title (plist-get sug :title))
+           (cmds (plist-get sug :commands)))
+      (magpt--btn-preview-text (format "AI suggestion: %s" title) cmds 'shell))))
+
+(defun magpt-ai-actions-copy (&optional idx)
+  "Copy commands for a suggestion to the kill-ring."
+  (interactive)
+  (magpt--ai-actions-init)
+  (if (zerop (length magpt--ai-actions-suggestions))
+      (user-error "No suggestions found; run magpt-explain-status first")
+    (let* ((i (or idx (magpt--ai-actions-choose-index)))
+           (sug (nth i magpt--ai-actions-suggestions))
+           (cmds (plist-get sug :commands)))
+      (kill-new cmds)
+      (message "magpt: suggestion commands copied"))))
+
+(defun magpt-ai-actions-copy-summary ()
+  "Copy the latest summary to the kill-ring."
+  (interactive)
+  (unless magpt--ai-actions-summary
+    (magpt--ai-actions-init))
+  (if (not (and (stringp magpt--ai-actions-summary)
+                (> (length magpt--ai-actions-summary) 0)))
+      (user-error "No summary available; run magpt-explain-status first")
+    (kill-new magpt--ai-actions-summary)
+    (message "magpt: summary copied")))
+
+(defun magpt-ai-actions-reload ()
+  "Reload AI actions state from the panel and refresh transient UI."
+  (interactive)
+  (magpt--ai-actions-init)
+  (when (featurep 'transient)
+    (transient-setup 'magpt-ai-actions))
+  (message "magpt: AI actions reloaded from panel"))
+
+(when (featurep 'transient)
+  (transient-define-prefix magpt-ai-actions ()
+    "AI actions (from last Explain Status result)"
+    [["Suggestions"
+      ("p" "Preview suggestion..." magpt-ai-actions-preview)
+      ("y" "Copy suggestion..." magpt-ai-actions-copy)
+      ("s" "Copy summary" magpt-ai-actions-copy-summary)]
+     ["Panel/Tasks"
+      ("o" "Open panel" magpt-show-panel)
+      ("g" "Get new recommendations (Explain Status)" magpt-explain-status)
+      ("r" "Reload from panel" magpt-ai-actions-reload)]]))
+
+(unless (fboundp 'magpt-ai-actions)
+  (defun magpt-ai-actions ()
+    "Fallback AI actions when `transient' is not available."
+    (interactive)
+    (magpt--ai-actions-init)
+    (call-interactively #'magpt-ai-actions-preview)))
 
 (provide 'magpt)
 

@@ -980,6 +980,42 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
     s))
 
 ;;;###autoload
+
+;; Safe helpers to integrate with Transient across versions (avoid hard failures).
+(defun magpt--transient-append-suffix-safe (parent pos spec)
+  "Try to append SPEC after POS in PARENT transient. Return non-nil on success."
+  (when (featurep 'transient)
+    (condition-case err
+        (prog1 t (transient-append-suffix parent pos spec))
+      (error
+       (magpt--log "transient append failed: parent=%S pos=%S err=%s"
+                   parent pos (error-message-string err))
+       nil))))
+
+(defun magpt--transient-remove-suffix-safe (parent key)
+  "Try to remove KEY from PARENT transient without throwing."
+  (when (featurep 'transient)
+    (ignore-errors (transient-remove-suffix parent key))))
+
+(defun magpt--transient-add-to-magit-dispatch ()
+  "Best-effort add magpt entries to `magit-dispatch' across Magit/Transient versions.
+We try several common anchors; if none match, we silently skip."
+  (when (featurep 'transient)
+    (let ((anchors '("!" "V" "B" "h" "t"))) ;; common groups in various magit-dispatch layouts
+      (cl-labels ((try (spec)
+                    (or (seq-some (lambda (a)
+                                    (magpt--transient-append-suffix-safe 'magit-dispatch a spec))
+                                  anchors)
+                        ;; final attempt: nil (some transient versions allow it)
+                        (magpt--transient-append-suffix-safe 'magit-dispatch nil spec))))
+        (try `("e" ,(magpt--transient-desc "Explain status (magpt)") magpt-explain-status))
+        (try `("E" ,(magpt--transient-desc "Explain hunk/region (magpt)") magpt-explain-hunk-region))
+        (try `("S" ,(magpt--transient-desc "Stage by intent (magpt)") magpt-stage-by-intent))
+        (try `("A" ,(magpt--transient-desc "Apply last stage-by-intent (magpt)") magpt-stage-by-intent-apply-last))
+        (try `("R" ,(magpt--transient-desc "Range/PR summary (magpt)") magpt-range-summary))
+        (try `("a" ,(magpt--transient-desc "AI actions (magpt)") magpt-ai-actions))))))
+
+;;;###autoload
 (define-minor-mode magpt-mode
   "Global minor mode: integrate MaGPT with Magit’s commit transient."
   :global t
@@ -989,30 +1025,16 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
         ;; Commit transient: add AI commit entry
         (transient-append-suffix 'magit-commit "c"
           `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged))
-        ;; Magit dispatch: add Phase 2 entries (Recommend). Appended at end.
-        (when (featurep 'transient)
-          ;; Append our entries after "!" (Run) in magit-dispatch to avoid transient API issues with nil position.
-          (transient-append-suffix 'magit-dispatch "!"
-            `("e" ,(magpt--transient-desc "Explain status (magpt)") magpt-explain-status))
-          (transient-append-suffix 'magit-dispatch "!"
-            `("E" ,(magpt--transient-desc "Explain hunk/region (magpt)") magpt-explain-hunk-region))
-          (transient-append-suffix 'magit-dispatch "!"
-            `("S" ,(magpt--transient-desc "Stage by intent (magpt)") magpt-stage-by-intent))
-          (transient-append-suffix 'magit-dispatch "!"
-            `("A" ,(magpt--transient-desc "Apply last stage-by-intent (magpt)") magpt-stage-by-intent-apply-last))
-          (transient-append-suffix 'magit-dispatch "!"
-            `("R" ,(magpt--transient-desc "Range/PR summary (magpt)") magpt-range-summary))
-          (transient-append-suffix 'magit-dispatch "!"
-            `("a" ,(magpt--transient-desc "AI actions (magpt)") magpt-ai-actions))))
+        ;; Magit dispatch: robust insertion (no hard dependency on a specific anchor).
+        (magpt--transient-add-to-magit-dispatch))
     (with-eval-after-load 'magit
-      (transient-remove-suffix 'magit-commit "i")
-      (when (featurep 'transient)
-        (transient-remove-suffix 'magit-dispatch "e")
-        (transient-remove-suffix 'magit-dispatch "E")
-        (transient-remove-suffix 'magit-dispatch "S")
-        (transient-remove-suffix 'magit-dispatch "A")
-        (transient-remove-suffix 'magit-dispatch "R")
-        (transient-remove-suffix 'magit-dispatch "a")))))
+      (magpt--transient-remove-suffix-safe 'magit-commit "i")
+      (magpt--transient-remove-suffix-safe 'magit-dispatch "e")
+      (magpt--transient-remove-suffix-safe 'magit-dispatch "E")
+      (magpt--transient-remove-suffix-safe 'magit-dispatch "S")
+      (magpt--transient-remove-suffix-safe 'magit-dispatch "A")
+      (magpt--transient-remove-suffix-safe 'magit-dispatch "R")
+      (magpt--transient-remove-suffix-safe 'magit-dispatch "a"))))
 
 ;;;; Section: Task registry (experimental core abstraction)
 ;;

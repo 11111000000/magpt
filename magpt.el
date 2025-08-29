@@ -127,11 +127,7 @@ Otherwise show results in a separate read-only buffer."
   :type 'boolean
   :group 'magpt)
 
-(defcustom magpt-send-on-empty-context nil
-  "If non-nil, still send an LLM request when a task's context is empty (0 bytes).
-When nil, magpt skips the request and records a panel entry instead."
-  :type 'boolean
-  :group 'magpt)
+
 
 (defcustom magpt-allow-apply-safe-ops t
   "If non-nil, enable safe apply operations (e.g., stage/unstage whole files) from magpt Panel or commands.
@@ -321,7 +317,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (replace-current-commit-msg? . "Replace the current commit message and insert the generated one? ")
     (callback-error . "magpt: error in callback: %s")
     ;; Panel
-    (panel-header . "MaGPT Panel — history (read-only)")
+    (panel-header . "MaGPT Panel — actions & history (read-only)")
     (panel-note . "Note: %s")
     (panel-request . "Request (preview):")
     (panel-response . "Response:")
@@ -334,7 +330,17 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (panel-actions-branch-name . "Actions: [Copy name] [Copy rationale] [Create branch]")
     (panel-json-opened . "Panel: opened response in JSON buffer")
     (panel-json-copied . "Panel: response copied to kill-ring")
-    (panel-sep . "----------------------------------------")))
+    (panel-sep . "----------------------------------------")
+    ;; Section titles (localized UI)
+    (panel-summary . "Summary:")
+    (panel-risks . "Risks:")
+    (panel-suggestions . "Suggestions:")
+    (panel-lint-status . "Lint status:")
+    (panel-issues . "Issues:")
+    (panel-suggestion . "Suggestion:")
+    (panel-name . "Name:")
+    (panel-alternatives . "Alternatives:")
+    (panel-rationale . "Rationale:")))
 
 (defconst magpt--i18n-ru
   '((confirm-send-full . "magpt: Отправить staged‑дифф в LLM (%d байт)? ")
@@ -352,7 +358,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (replace-current-commit-msg? . "Заменить текущее сообщение коммита и вставить сгенерированное? ")
     (callback-error . "magpt: ошибка в callback: %s")
     ;; Panel
-    (panel-header . "MaGPT Панель — история (только чтение)")
+    (panel-header . "MaGPT Панель — действия и история (только чтение)")
     (panel-note . "Заметка: %s")
     (panel-request . "Запрос (превью):")
     (panel-response . "Ответ:")
@@ -365,7 +371,17 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (panel-actions-branch-name . "Действия: [Скопировать имя] [Скопировать обоснование] [Создать ветку]")
     (panel-json-opened . "Панель: ответ открыт в JSON буфере")
     (panel-json-copied . "Панель: ответ скопирован в kill-ring")
-    (panel-sep . "----------------------------------------")))
+    (panel-sep . "----------------------------------------")
+    ;; Section titles (localized UI)
+    (panel-summary . "Сводка:")
+    (panel-risks . "Риски:")
+    (panel-suggestions . "Рекомендации:")
+    (panel-lint-status . "Статус lint:")
+    (panel-issues . "Проблемы:")
+    (panel-suggestion . "Предложение:")
+    (panel-name . "Имя:")
+    (panel-alternatives . "Альтернативы:")
+    (panel-rationale . "Обоснование:")))
 
 (defun magpt--i18n (key &rest args)
   "Format localized message for KEY with ARGS using `magpt-info-language'."
@@ -380,11 +396,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
 ;;
 ;; We centralize gptel-request usage for logging and callback safety. Streaming is opt-in.
 
-(defcustom magpt-stream-output nil
-  "If non-nil, request streaming from gptel when supported.
-This does not change final insertion semantics."
-  :type 'boolean
-  :group 'magpt)
+
 
 (defun magpt--response->string (resp)
   "Return RESP as a string, tolerating backend variations."
@@ -398,6 +410,21 @@ This does not change final insertion semantics."
    ((listp resp)
     (condition-case _ (json-encode resp) (error (format "%S" resp))))
    (t (format "%S" resp))))
+
+(defun magpt--sanitize-response (s)
+  "Sanitize LLM response S: strip common Markdown fences and leading labels."
+  (let* ((s (string-trim (or s ""))))
+    ;; Strip leading 'Answer:'/'Ответ:' labels (common model prefixes)
+    (setq s (replace-regexp-in-string "\\`\\(?:\\s-*\\(Answer\\|Ответ\\)[:：].*\\n+\\)+" "" s))
+    ;; Strip outer Markdown fences (=lang ... = or ~~~)
+    (let* ((lines (split-string s "\n"))
+           (first (car lines))
+           (last  (car (last lines))))
+      (when (and first last
+                 (string-match-p "\\`[`~]\\{3,\\}" first)
+                 (string-match-p "\\`[`~]\\{3,\\}[ \t]*\\'" last))
+        (setq s (mapconcat #'identity (butlast (cdr lines)) "\n"))))
+    s))
 
 (defun magpt--safe-callback (cb)
   "Wrap CB to prevent hard failures; log diagnostics on error."
@@ -728,53 +755,18 @@ Return non-nil if insertion happened."
   "Face for the commit message generation overlay."
   :group 'magpt)
 
-(defcustom magpt-progress-spinner nil
-  "If non-nil, animate the commit overlay while waiting for the model."
-  :type 'boolean
-  :group 'magpt)
 
-(defcustom magpt-overlay-spinner-frames
-  '("⠁" "⠂" "⠄" "⠂")
-  "Frames used for the simple spinner animation."
-  :type '(repeat string)
-  :group 'magpt)
+
+
 
 (defvar-local magpt--commit-overlay nil
   "Overlay shown in the commit buffer while message generation is in progress.")
-(defvar-local magpt--overlay-spinner-timer nil
-  "Internal timer for overlay spinner animation.")
-(defvar-local magpt--overlay-spinner-phase 0
-  "Internal spinner phase index for overlay animation.")
 
-(defun magpt--overlay-spinner-on (buf)
-  "Start spinner animation in BUF if `magpt-progress-spinner' is enabled."
-  (when (and magpt-progress-spinner (buffer-live-p buf))
-    (with-current-buffer buf
-      (unless (timerp magpt--overlay-spinner-timer)
-        (setq magpt--overlay-spinner-phase 0)
-        (setq magpt--overlay-spinner-timer
-              (run-with-timer
-               0 0.12
-               (lambda (b)
-                 (when (buffer-live-p b)
-                   (with-current-buffer b
-                     (when (overlayp magpt--commit-overlay)
-                       (let* ((frames magpt-overlay-spinner-frames)
-                              (i (mod magpt--overlay-spinner-phase (max 1 (length frames))))
-                              (frame (nth i frames))
-                              (txt (concat frame " " magpt-commit-overlay-text "\n")))
-                         (setq magpt--overlay-spinner-phase (1+ magpt--overlay-spinner-phase))
-                         (overlay-put magpt--commit-overlay 'before-string
-                                      (propertize txt 'face 'magpt-commit-overlay-face)))))))
-               buf))))))
 
-(defun magpt--overlay-spinner-off (buf)
-  "Stop spinner animation in BUF if running."
-  (when (buffer-live-p buf)
-    (with-current-buffer buf
-      (when (timerp magpt--overlay-spinner-timer)
-        (cancel-timer magpt--overlay-spinner-timer)
-        (setq magpt--overlay-spinner-timer nil)))))
+
+
+
+
 
 (defun magpt--show-commit-overlay (buf)
   "Show an overlay in BUF to indicate commit message generation is in progress."
@@ -785,14 +777,12 @@ Return non-nil if insertion happened."
           (setq magpt--commit-overlay (make-overlay (point-min) (point-min) buf t t)))
         (overlay-put magpt--commit-overlay 'before-string
                      (propertize (concat magpt-commit-overlay-text "\n")
-                                 'face 'magpt-commit-overlay-face))
-        (magpt--overlay-spinner-on buf)))))
+                                 'face 'magpt-commit-overlay-face))))))
 
 (defun magpt--remove-commit-overlay (buf)
   "Remove overlay in BUF if present."
   (when (buffer-live-p buf)
     (with-current-buffer buf
-      (magpt--overlay-spinner-off buf)
       (when (overlayp magpt--commit-overlay)
         (delete-overlay magpt--commit-overlay)
         (setq magpt--commit-overlay nil)))))
@@ -840,8 +830,7 @@ insert the result there; otherwise show it in *magpt-commit*."
                    prompt
                    :system (magpt--system-prompt 'commit)
                    :context target
-                   :callback (magpt--safe-callback #'magpt--commit-callback)
-                   :stream magpt-stream-output))
+                   :callback (magpt--safe-callback #'magpt--commit-callback)))
               (error
                (when target (magpt--remove-commit-overlay target))
                (message "%s" (magpt--i18n 'gptel-error (error-message-string err))))))
@@ -923,8 +912,7 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                          prompt
                          :system (magpt--system-prompt 'commit)
                          :context target-buf
-                         :callback (magpt--safe-callback #'magpt--commit-callback)
-                         :stream magpt-stream-output))
+                         :callback (magpt--safe-callback #'magpt--commit-callback)))
                     (error
                      (magpt--remove-commit-overlay target-buf)
                      (message "%s" (magpt--i18n 'gptel-error (error-message-string err))))))
@@ -945,8 +933,7 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                                    prompt
                                    :system (magpt--system-prompt 'commit)
                                    :context buf
-                                   :callback (magpt--safe-callback #'magpt--commit-callback)
-                                   :stream magpt-stream-output))
+                                   :callback (magpt--safe-callback #'magpt--commit-callback)))
                               (error
                                (magpt--remove-commit-overlay buf)
                                (message "%s" (magpt--i18n 'gptel-error (error-message-string err)))))))))
@@ -972,16 +959,11 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
   "Face for MaGPT entries in Magit transient menus."
   :group 'magpt)
 
-(defcustom magpt-transient-colorize t
-  "If non-nil, colorize MaGPT entries in Magit transient menus."
-  :type 'boolean
-  :group 'magpt)
+
 
 (defun magpt--transient-desc (s)
-  "Return S, optionally propertized with `magpt-transient-face' for transient menus."
-  (if magpt-transient-colorize
-      (propertize s 'face 'magpt-transient-face)
-    s))
+  "Return S; kept for future styling hooks."
+  s)
 
 ;;;###autoload
 
@@ -1002,22 +984,16 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
     (ignore-errors (transient-remove-suffix parent key))))
 
 (defun magpt--transient-add-to-magit-dispatch ()
-  "Best-effort add magpt entries to `magit-dispatch' across Magit/Transient versions.
-We try several common anchors; if none match, we silently skip."
+  "Best-effort add magpt entries to `magit-dispatch' across Magit/Transient versions."
   (when (featurep 'transient)
-    (let ((anchors '("!" "V" "B" "h" "t"))) ;; common groups in various magit-dispatch layouts
+    (let ((anchors '("!" "V" "B" "h" "t")))
       (cl-labels ((try (spec)
                     (or (seq-some (lambda (a)
                                     (magpt--transient-append-suffix-safe 'magit-dispatch a spec))
                                   anchors)
-                        ;; final attempt: nil (some transient versions allow it)
                         (magpt--transient-append-suffix-safe 'magit-dispatch nil spec))))
-        (try `("e" ,(magpt--transient-desc "Explain status (magpt)") magpt-explain-status))
-        (try `("E" ,(magpt--transient-desc "Explain hunk/region (magpt)") magpt-explain-hunk-region))
-        (try `("S" ,(magpt--transient-desc "Stage by intent (magpt)") magpt-stage-by-intent))
-        (try `("A" ,(magpt--transient-desc "Apply last stage-by-intent (magpt)") magpt-stage-by-intent-apply-last))
-        (try `("R" ,(magpt--transient-desc "Range/PR summary (magpt)") magpt-range-summary))
-        (try `("a" ,(magpt--transient-desc "AI actions (magpt)") magpt-ai-actions))))))
+        (try `("M-h" ,(magpt--transient-desc "Explain hunk/region (magpt)") magpt-explain-hunk-region))
+        (try `("M-a" ,(magpt--transient-desc "AI actions (magpt)") magpt-ai-actions))))))
 
 ;;;###autoload
 (define-minor-mode magpt-mode
@@ -1072,15 +1048,9 @@ We try several common anchors; if none match, we silently skip."
   "Run TASK: collect context, build prompt, request model, then render/apply."
   (pcase-let* ((`(,data ,_preview ,bytes) (funcall (magpt-task-context-fn task) ctx))
                (prompt (funcall (magpt-task-prompt-fn task) data)))
-    (if (and (or (null bytes) (zerop bytes))
-             (not magpt-send-on-empty-context))
-        (let* ((name (magpt-task-name task))
-               (note "Empty context; LLM request skipped")
-               (resp (if (eq name 'explain-status)
-                         "{\"summary\":\"Working tree clean; index empty.\",\"risks\":[],\"suggestions\":[{\"title\":\"Update local repository\",\"commands\":[\"git fetch --all\",\"git pull --ff-only\"]},{\"title\":\"Start a new branch\",\"commands\":[\"git switch -c feature/initial\"]}]}"
-                       "{\"note\":\"empty context; nothing to send\"}")))
+    (if (and (or (null bytes) (zerop bytes)))
+        (let ((name (magpt-task-name task)))
           (magpt--log "run-task: %s skipped (empty context)" name)
-          (magpt--panel-append-entry name (or prompt "") resp note)
           (message "magpt: nothing to send for %s (empty context)" name))
       (let ((ok (if (magpt-task-confirm-send? task)
                     (magpt--confirm-send bytes bytes)
@@ -1108,8 +1078,7 @@ We try several common anchors; if none match, we silently skip."
                    (error
                     (magpt--log "task-callback exception: %s\nBT:\n%s"
                                 (error-message-string err) (magpt--backtrace-string))
-                    (message "%s" (magpt--i18n 'callback-error (error-message-string err)))))))
-             :stream magpt-stream-output)))))))
+                    (message "%s" (magpt--i18n 'callback-error (error-message-string err))))))))))))))
 
 ;;;###autoload
 (defun magpt-run-task (name &optional ctx)
@@ -1140,10 +1109,7 @@ We try several common anchors; if none match, we silently skip."
   :type 'string
   :group 'magpt)
 
-(defcustom magpt-panel-auto-pop t
-  "If non-nil, automatically pop to panel when a task finishes."
-  :type 'boolean
-  :group 'magpt)
+
 
 (defvar magpt--panel-entries nil
   "List of panel entries (plists):
@@ -1153,19 +1119,7 @@ We try several common anchors; if none match, we silently skip."
 (defvar magpt--current-request nil
   "Dynamically bound prompt/request preview for panel rendering.")
 
-(defun magpt--panel-actions-line (entry)
-  "Return a localized actions line for panel ENTRY, reflecting available operations."
-  (let* ((task (plist-get entry :task))
-         (valid (plist-get entry :valid)))
-    (cond
-     ((and (eq task 'stage-by-intent) valid magpt-allow-apply-safe-ops)
-      (magpt--i18n 'panel-actions-apply-stage-intent))
-     ((eq task 'commit-lint-suggest)
-      (magpt--i18n 'panel-actions-commit-lint))
-     ((eq task 'branch-name-suggest)
-      (magpt--i18n 'panel-actions-branch-name))
-     (t
-      (magpt--i18n 'panel-actions)))))
+
 
 ;; Panel minor mode for navigation and actions
 (defvar magpt-panel-mode-map
@@ -1174,7 +1128,15 @@ We try several common anchors; if none match, we silently skip."
     (define-key m (kbd "j") #'magpt-panel-open-response-json)
     (define-key m (kbd "n") #'magpt-panel-next-entry)
     (define-key m (kbd "p") #'magpt-panel-previous-entry)
-    (define-key m (kbd "t") #'magpt-panel-toggle-pretty)
+    (define-key m (kbd "q") #'quit-window)
+    (define-key m (kbd "g") #'magpt-explain-status)
+    (define-key m (kbd "A") #'magpt-panel-view-actions)
+    (define-key m (kbd "H") #'magpt-panel-view-history)
+    (define-key m (kbd "TAB") #'forward-button)
+    (define-key m (kbd "<backtab>") #'backward-button)
+    (define-key m (kbd "RET") #'push-button)
+    (define-key m (kbd "SPC") #'push-button)
+
     (define-key m (kbd "?") #'magpt-panel-help)
     (define-key m (kbd "f") #'magpt-panel-filter-by-task)
     (define-key m (kbd "F") #'magpt-panel-clear-filter)
@@ -1196,15 +1158,11 @@ We try several common anchors; if none match, we silently skip."
 Keys:
   c — copy current entry response to kill-ring
   j — open current entry response in JSON buffer (pretty-printed when valid)
-  n/p — jump to next/previous entry
-  t — toggle pretty rendering for supported tasks (e.g., explain-status)"
+  n/p — jump to next/previous entry"
   :init-value nil :lighter " magpt-panel" :keymap magpt-panel-mode-map
   (read-only-mode (if magpt-panel-mode 1 -1)))
 
-(defcustom magpt-panel-pretty-default t
-  "If non-nil, render supported tasks (like explain-status) in a structured, pretty form."
-  :type 'boolean
-  :group 'magpt)
+
 
 (defface magpt-panel-title-face
   '((t :inherit mode-line-buffer-id :weight bold))
@@ -1231,8 +1189,7 @@ Keys:
   "Face for suggestion titles in pretty rendering."
   :group 'magpt)
 
-(defvar-local magpt--panel-pretty nil
-  "Buffer-local toggle for pretty rendering in panel.")
+
 
 (defcustom magpt-ui-density 'regular
   "Panel density profile: 'regular or 'compact.
@@ -1259,6 +1216,9 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
 (defvar-local magpt--panel-filter-task nil
   "When non-nil, show only entries whose :task equals this symbol in the panel.")
 
+(defvar-local magpt--panel-view 'actions
+  "Current panel view: 'actions (default) or 'history.")
+
 (defun magpt--insert-badge (label face)
   "Insert a bracketed LABEL with FACE."
   (insert (propertize (format "[%s]" label) 'face face) " "))
@@ -1279,6 +1239,14 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
     (condition-case _err
         (json-parse-string (or resp "") :object-type 'alist :array-type 'list)
       (error nil))))
+
+(defun magpt--panel-entry-age-min (entry)
+  "Return age of ENTRY in minutes, or nil if unavailable."
+  (let* ((ts (plist-get entry :time))
+         (tm (and (stringp ts) (parse-time-string ts)))
+         (t0 (and tm (ignore-errors (apply #'encode-time tm))))
+         (diff (and t0 (float-time (time-subtract (current-time) t0)))))
+    (when diff (max 0 (floor (/ diff 60))))))
 
 (defun magpt--btn-copy-summary (button)
   "Copy explain-status summary."
@@ -1405,8 +1373,7 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
 
 (defun magpt--panel-render-explain-status-pretty (entry)
   "Pretty rendering for explain-status ENTRY: summary, risks, suggestions."
-  (let* ((note (or (plist-get entry :note) ""))
-         (data (magpt--panel-parse-json-safe entry))
+  (let* ((data (magpt--panel-parse-json-safe entry))
          (summary (and (alist-get 'summary data) (format "%s" (alist-get 'summary data))))
          (risks-full (or (alist-get 'risks data) '()))
          (sugs-full (or (alist-get 'suggestions data) '()))
@@ -1415,13 +1382,11 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
          (max-s (and compact magpt-panel-compact-max-suggestions))
          (risks (if max-r (seq-take risks-full max-r) risks-full))
          (sugs  (if max-s (seq-take sugs-full max-s) sugs-full)))
-    (when (and (stringp note) (> (length note) 0))
-      (insert (format (concat (magpt--i18n 'panel-note) "\n") note)))
     ;; Summary
-    (insert (propertize (format "%s\n" "Summary:") 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-summary)) 'face 'magpt-panel-section-face))
     (insert (or summary "(no summary)") (if compact "\n" "\n\n"))
     ;; Risks
-    (insert (propertize (format "%s\n" "Risks:") 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-risks)) 'face 'magpt-panel-section-face))
     (if (and (listp risks) (> (length risks) 0))
         (dolist (r risks) (insert "  • " (format "%s" r) "\n"))
       (insert "  • none\n"))
@@ -1429,7 +1394,7 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
       (insert (format "  … %d more\n" (- (length risks-full) (length risks)))))
     (insert (if compact "" "\n"))
     ;; Suggestions
-    (insert (propertize (format "%s\n" "Suggestions:") 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-suggestions)) 'face 'magpt-panel-section-face))
     (if (and (listp sugs) (> (length sugs) 0))
         (cl-loop for s in sugs
                  for i from 1 do
@@ -1466,14 +1431,14 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
          (issues (or (alist-get 'issues data) '()))
          (sug (alist-get 'suggestion data))
          (msg (and sug (alist-get 'message sug))))
-    (insert (propertize "Lint status:\n" 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-lint-status)) 'face 'magpt-panel-section-face))
     (insert (or (and (stringp status) status) "(unknown)") "\n\n")
-    (insert (propertize "Issues:\n" 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-issues)) 'face 'magpt-panel-section-face))
     (if (and (listp issues) (> (length issues) 0))
         (dolist (it issues) (insert "  • " (format "%s" it) "\n"))
       (insert "  • none\n"))
     (insert "\n")
-    (insert (propertize "Suggestion:\n" 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-suggestion)) 'face 'magpt-panel-section-face))
     (if (stringp msg)
         (progn
           (dolist (ln (split-string (string-trim-right msg) "\n"))
@@ -1506,7 +1471,7 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
          (name (alist-get 'name data))
          (alts (or (alist-get 'alternatives data) '()))
          (rat  (alist-get 'rationale data)))
-    (insert (propertize "Name:\n" 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-name)) 'face 'magpt-panel-section-face))
     (insert (or (and (stringp name) name) "(no name)") "\n")
     (when (stringp name)
       (insert "    ")
@@ -1524,12 +1489,12 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
                           'magpt-entry entry))
       (insert "\n"))
     (insert "\n")
-    (insert (propertize "Alternatives:\n" 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-alternatives)) 'face 'magpt-panel-section-face))
     (if (and (listp alts) (> (length alts) 0))
         (dolist (n alts) (insert "  • " (format "%s" n) "\n"))
       (insert "  • none\n"))
     (insert "\n")
-    (insert (propertize "Rationale:\n" 'face 'magpt-panel-section-face))
+    (insert (propertize (format "%s\n" (magpt--i18n 'panel-rationale)) 'face 'magpt-panel-section-face))
     (if (stringp rat)
         (progn
           (dolist (ln (split-string (string-trim-right rat) "\n"))
@@ -1544,11 +1509,78 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
       (insert "  (no rationale)\n"))
     (insert "\n")))
 
-(defun magpt-panel-toggle-pretty ()
-  "Toggle pretty rendering for supported tasks and refresh the panel."
-  (interactive)
-  (setq magpt--panel-pretty (not magpt--panel-pretty))
-  (magpt-show-panel))
+(defun magpt--panel-render-actions ()
+  "Render compact 'Actions' view using latest entries for key tasks."
+  (let ((magpt-ui-density 'compact))
+    (let* ((ex (magpt--panel-last-entry-for 'explain-status))
+           (cl (magpt--panel-last-entry-for 'commit-lint-suggest))
+           (bn (magpt--panel-last-entry-for 'branch-name-suggest))
+           (rc (magpt--panel-last-entry-for 'resolve-conflict-here)))
+      ;; Explain Status card
+      (insert (propertize "---------------- [Explain Status] ----------------\n" 'face 'magpt-panel-title-face))
+      (if (not ex)
+          (insert "Нет данных. Нажмите g, чтобы получить рекомендации.\n\n")
+        (let ((start (point)))
+          (let* ((valid (plist-get ex :valid))
+                 (age (magpt--panel-entry-age-min ex)))
+            (magpt--insert-badge (if valid "JSON OK" "JSON?") (if valid 'magpt-badge-ok-face 'magpt-badge-warn-face))
+            (when age (magpt--insert-badge (format "TTL:%dm" age) 'magpt-badge-info-face))
+            (insert "\n"))
+          (if (and (plist-get ex :valid) (magpt--panel-parse-json-safe ex))
+              (magpt--panel-render-explain-status-pretty ex)
+            (insert (magpt--i18n 'panel-response) "\n")
+            (insert (string-trim-right (plist-get ex :response)) "\n\n"))
+          (magpt--panel-insert-buttons ex)
+          (insert "\n")
+          (put-text-property start (point) 'magpt-entry ex)))
+      ;; Commit Lint card
+      (when cl
+        (insert (propertize "------------ [Commit Lint / Fix Suggest] -----------\n" 'face 'magpt-panel-title-face))
+        (let ((start (point)))
+          (let* ((valid (plist-get cl :valid))
+                 (age (magpt--panel-entry-age-min cl)))
+            (magpt--insert-badge (if valid "JSON OK" "JSON?") (if valid 'magpt-badge-ok-face 'magpt-badge-warn-face))
+            (when age (magpt--insert-badge (format "TTL:%dm" age) 'magpt-badge-info-face))
+            (insert "\n"))
+          (if (and (plist-get cl :valid) (magpt--panel-parse-json-safe cl))
+              (magpt--panel-render-commit-lint-pretty cl)
+            (insert (magpt--i18n 'panel-response) "\n")
+            (insert (string-trim-right (plist-get cl :response)) "\n\n"))
+          (magpt--panel-insert-buttons cl)
+          (insert "\n")
+          (put-text-property start (point) 'magpt-entry cl)))
+      ;; Branch Name card
+      (when bn
+        (insert (propertize "---------------- [Branch Name Suggest] -------------\n" 'face 'magpt-panel-title-face))
+        (let ((start (point)))
+          (let* ((valid (plist-get bn :valid))
+                 (age (magpt--panel-entry-age-min bn)))
+            (magpt--insert-badge (if valid "JSON OK" "JSON?") (if valid 'magpt-badge-ok-face 'magpt-badge-warn-face))
+            (when age (magpt--insert-badge (format "TTL:%dm" age) 'magpt-badge-info-face))
+            (insert "\n"))
+          (if (and (plist-get bn :valid) (magpt--panel-parse-json-safe bn))
+              (magpt--panel-render-branch-name-pretty bn)
+            (insert (magpt--i18n 'panel-response) "\n")
+            (insert (string-trim-right (plist-get bn :response)) "\n\n"))
+          (magpt--panel-insert-buttons bn)
+          (insert "\n")
+          (put-text-property start (point) 'magpt-entry bn)))
+      ;; Resolve conflict card (optional)
+      (when rc
+        (insert (propertize "--------------- [Resolve Conflict (here)] ----------\n" 'face 'magpt-panel-title-face))
+        (let ((start (point)))
+          (let* ((valid (plist-get rc :valid))
+                 (age (magpt--panel-entry-age-min rc)))
+            (magpt--insert-badge (if valid "JSON OK" "JSON?") (if valid 'magpt-badge-ok-face 'magpt-badge-warn-face))
+            (when age (magpt--insert-badge (format "TTL:%dm" age) 'magpt-badge-info-face))
+            (insert "\n"))
+          (insert (magpt--i18n 'panel-response) "\n")
+          (insert (string-trim-right (plist-get rc :response)) "\n\n")
+          (magpt--panel-insert-buttons rc)
+          (insert "\n")
+          (put-text-property start (point) 'magpt-entry rc))))))
+
+
 
 (defun magpt-panel-next-entry ()
   "Move point to the start of the next panel entry."
@@ -1577,13 +1609,17 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert "MaGPT Panel — keys:\n\n")
-        (insert "  n/p  : next/previous entry\n")
-        (insert "  c    : copy response\n")
-        (insert "  j    : open response in JSON buffer\n")
-        (insert "  t    : toggle pretty rendering\n")
-        (insert "  f/F  : filter by task / clear filter\n")
-        (insert "  1..9 : preview suggestion commands (explain-status)\n")
-        (insert "  ?    : this help\n")
+        (insert "  A/H       : switch view (Actions/History)\n")
+        (insert "  TAB/S-TAB : move between buttons\n")
+        (insert "  RET/SPACE : activate button\n")
+        (insert "  n/p       : next/previous entry\n")
+        (insert "  c         : copy response\n")
+        (insert "  j         : open response in JSON buffer\n")
+        (insert "  g         : get new recommendations (Explain Status)\n")
+        (insert "  f/F       : filter by task / clear filter\n")
+        (insert "  1..9      : preview suggestion commands (explain-status)\n")
+        (insert "  q         : quit panel\n")
+        (insert "  ?         : this help\n")
         (goto-char (point-min))
         (setq buffer-read-only t)))
     (pop-to-buffer buf)))
@@ -1605,6 +1641,33 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
   (message "magpt: filter cleared")
   (magpt-show-panel))
 
+(defun magpt-panel-view-actions ()
+  "Switch panel to Actions view."
+  (interactive)
+  (setq magpt--panel-view 'actions)
+  (magpt-show-panel))
+
+(defun magpt-panel-view-history ()
+  "Switch panel to History view."
+  (interactive)
+  (setq magpt--panel-view 'history)
+  (magpt-show-panel))
+
+(defun magpt--panel-insert-view-toggle ()
+  "Insert top navigation line with Actions/History buttons and key hints."
+  (let ((v (or magpt--panel-view 'actions)))
+    (insert "View: ")
+    (make-text-button (if (eq v 'actions) "[Actions*]" "[Actions]") nil
+                      'action #'magpt-panel-view-actions
+                      'follow-link t
+                      'help-echo "Switch to Actions view")
+    (insert "  ")
+    (make-text-button (if (eq v 'history) "[History*]" "[History]") nil
+                      'action #'magpt-panel-view-history
+                      'follow-link t
+                      'help-echo "Switch to History view")
+    (insert "    g: get  f/F: filter  q: quit  ? help\n\n")))
+
 (defun magpt--panel-preview-suggestion-index (entry idx1)
   "Preview commands of suggestion IDX1 (1-based) for explain-status ENTRY."
   (let* ((data (magpt--panel-parse-json-safe entry))
@@ -1618,13 +1681,14 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
     (magpt--btn-preview-text (format "AI suggestion: %s" title) (or cmds "") 'shell)))
 
 (defun magpt--panel-preview-suggestion-digit (n)
-  "Preview suggestion N (1..9) for current entry at point."
+  "Preview suggestion N (1..9) using explain-status (current or latest)."
   (interactive)
-  (let ((e (or (magpt--panel-entry-at-point) (car (last magpt--panel-entries)))))
-    (unless e (user-error "No panel entry at point"))
-    (unless (eq (plist-get e :task) 'explain-status)
-      (user-error "Digit previews are available for explain-status entries"))
-    (magpt--panel-preview-suggestion-index e n)))
+  (let* ((cur (or (magpt--panel-entry-at-point) (car (last magpt--panel-entries)))))
+    (let ((e (if (and cur (eq (plist-get cur :task) 'explain-status))
+                 cur
+               (magpt--panel-last-entry-for 'explain-status))))
+      (unless e (user-error "No explain-status entry found"))
+      (magpt--panel-preview-suggestion-index e n))))
 
 ;; Digit preview commands
 (defun magpt-panel-preview-suggestion-1 () (interactive) (magpt--panel-preview-suggestion-digit 1))
@@ -1906,49 +1970,52 @@ Relies on 'magpt-entry text property."
                (branch (ignore-errors (when root (magpt--git root "rev-parse" "--abbrev-ref" "HEAD"))))
                (filter (and magpt--panel-filter-task (symbol-name magpt--panel-filter-task)))
                (hdr (magpt--i18n 'panel-header)))
-          (insert (format "%s%s%s\n\n"
-                          hdr
-                          (if root (format "  [%s]" (file-name-nondirectory (directory-file-name root))) "")
-                          (concat
-                           (if (and branch (not (string-empty-p branch))) (format " [%s]" branch) "")
-                           (if filter (format " [filter:%s]" filter) "")))))
-        (unless (local-variable-p 'magpt--panel-pretty)
-          (setq-local magpt--panel-pretty magpt-panel-pretty-default))
-        (dolist (e (reverse magpt--panel-entries))
-          (when (or (null magpt--panel-filter-task)
-                    (eq (plist-get e :task) magpt--panel-filter-task))
-            (let* ((start (point))
-                   (task (plist-get e :task))
-                   (req  (plist-get e :request))
-                   (resp (plist-get e :response))
-                   (valid (plist-get e :valid)))
-              ;; Header with badges
-              (magpt--panel-insert-header e)
-              ;; Request preview (trimmed)
-              (insert (format "%s\n%s\n\n"
-                              (magpt--i18n 'panel-request)
-                              (if (> (length req) 2000) (concat (substring req 0 2000) " …") req)))
-              ;; Response
-              (cond
-               ((and magpt--panel-pretty (eq task 'explain-status) valid (magpt--panel-parse-json-safe e))
-                (magpt--panel-render-explain-status-pretty e))
-               ((and magpt--panel-pretty (eq task 'commit-lint-suggest) valid (magpt--panel-parse-json-safe e))
-                (magpt--panel-render-commit-lint-pretty e))
-               ((and magpt--panel-pretty (eq task 'branch-name-suggest) valid (magpt--panel-parse-json-safe e))
-                (magpt--panel-render-branch-name-pretty e))
-               (t
-                (insert (magpt--i18n 'panel-response) "\n")
-                (insert (string-trim-right resp) "\n\n")))
-              ;; Validity + actions
-              (insert (format "%s\n"
-                              (format (magpt--i18n 'panel-valid)
-                                      (if valid (magpt--i18n 'panel-yes) (magpt--i18n 'panel-no)))))
-              (let ((actions (magpt--panel-actions-line e)))
-                (insert actions "\n"))
-              (magpt--panel-insert-buttons e)
-              (insert (magpt--i18n 'panel-sep) "\n\n")
-              (let ((end (point)))
-                (put-text-property start end 'magpt-entry e))))))
+          (setq header-line-format
+                (format "%s%s%s  • View: %s • A/H toggle • TAB/S-TAB move • RET/SPACE activate • 1..9 preview • q quit • ? help"
+                        hdr
+                        (if root (format "  [%s]" (file-name-nondirectory (directory-file-name root))) "")
+                        (concat
+                         (if (and branch (not (string-empty-p branch))) (format " [%s]" branch) "")
+                         (if filter (format " [filter:%s]" filter) ""))
+                        (if (eq (or magpt--panel-view 'actions) 'history) "History" "Actions")))
+          (insert "\n")
+          (magpt--panel-insert-view-toggle))
+
+        (unless magpt--panel-view (setq-local magpt--panel-view 'actions))
+        (if (eq magpt--panel-view 'actions)
+            (progn
+              (magpt--panel-render-actions)
+              (let ((pos (next-single-property-change (point-min) 'magpt-entry nil (point-max))))
+                (when pos
+                  (goto-char pos)
+                  (ignore-errors (forward-button 1)))))
+          (dolist (e (reverse magpt--panel-entries))
+            (when (or (null magpt--panel-filter-task)
+                      (eq (plist-get e :task) magpt--panel-filter-task))
+              (let* ((start (point))
+                     (task (plist-get e :task))
+                     (req  (plist-get e :request))
+                     (resp (plist-get e :response))
+                     (valid (plist-get e :valid)))
+                ;; Header with badges
+                (magpt--panel-insert-header e)
+
+                ;; Response
+                (cond
+                 ((and (eq task 'explain-status) valid (magpt--panel-parse-json-safe e))
+                  (magpt--panel-render-explain-status-pretty e))
+                 ((and (eq task 'commit-lint-suggest) valid (magpt--panel-parse-json-safe e))
+                  (magpt--panel-render-commit-lint-pretty e))
+                 ((and (eq task 'branch-name-suggest) valid (magpt--panel-parse-json-safe e))
+                  (magpt--panel-render-branch-name-pretty e))
+                 (t
+                  (insert (magpt--i18n 'panel-response) "\n")
+                  (insert (string-trim-right resp) "\n\n")))
+                ;; Actions (buttons only)
+                (magpt--panel-insert-buttons e)
+                (insert "\n")
+                (let ((end (point)))
+                  (put-text-property start end 'magpt-entry e)))))))
       (magpt-panel-mode 1)
       (goto-char (point-min)))
     buf))
@@ -1960,8 +2027,9 @@ Relies on 'magpt-entry text property."
   (pop-to-buffer (magpt--panel-buffer)))
 
 (defun magpt--panel-append-entry (task request response &optional note)
-  "Append a history entry to panel for TASK with REQUEST/RESPONSE."
-  (let* ((resp (magpt--response->string (or response "")))
+  "Append a history entry to panel for TASK with REQUEST/RESPONSE and refresh panel if visible."
+  (let* ((resp-raw (magpt--response->string (or response "")))
+         (resp (magpt--sanitize-response resp-raw))
          (looks-like-json (string-match-p "\\`[ \t\n]*[{\\[]" resp))
          (json-valid
           (and looks-like-json
@@ -1978,8 +2046,11 @@ Relies on 'magpt-entry text property."
     (magpt--log "panel: task=%s json?=%s valid=%s resp-preview=%s"
                 task looks-like-json json-valid
                 (substring resp 0 (min 180 (length resp))))
-    (when magpt-panel-auto-pop
-      (magpt-show-panel))))
+    ;; Auto-refresh panel if it is currently visible
+    (let ((win (get-buffer-window magpt-panel-buffer-name t)))
+      (when (window-live-p win)
+        (with-selected-window win
+          (magpt--panel-buffer))))))
 
 ;;;; Section: Apply infrastructure (Phase 2)
 ;;
@@ -2696,7 +2767,6 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
       ("s" "Copy summary" magpt-ai-actions-copy-summary)]
      ["Panel/Tasks"
       ("o" "Open panel" magpt-show-panel)
-      ("t" "Toggle panel pretty" magpt-panel-toggle-pretty)
       ("g" "Get new recommendations (Explain Status)" magpt-explain-status)
       ("r" "Reload from panel" magpt-ai-actions-reload)]]))
 
@@ -2741,7 +2811,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
               (let ((title (or (alist-get 'title s) "")))
                 (insert (format "  %d) %s\n" idx title))
                 (setq idx (1+ idx))))))
-         (insert "  [o] Open panel    [a] AI actions\n\n"))))))
+         (insert "  [M-o] Open panel    [M-a] AI actions\n\n"))))))
 
 (provide 'magpt)
 

@@ -70,7 +70,7 @@ MELPA support is planned for the stable release cycle.
 ** Example Scenario: Calm Precision, Full Transparency
 
 - Open Magit Status (=M-x magit-status=).
-- Press =e= for "Explain status": get a concise overview and risk assessment.
+- Press =?= to open Magit Dispatch, then =e= for "Explain status": get a concise overview and risk assessment.
 - Use "Stage by intent": magpt suggests logical groups for staging, which you can review and approve.
 - Ask for a "Commit with AI message": always confirm what will be sent; message appears in context but is never forced.
 - If conflict arises, "Explain conflict" and "Propose resolution patch" will appear—with dry-run diffs and complete control.

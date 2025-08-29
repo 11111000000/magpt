@@ -917,7 +917,7 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
 ;; Adds a button “[i] Commit with AI message (magpt)” to Magit’s commit transient.
 
 (defface magpt-transient-face
-  '((t :inherit font-lock-keyword-face :weight bold))
+  '((t :inherit font-lock-keyword-face :foreground "green3" :weight bold))
   "Face for MaGPT entries in Magit transient menus."
   :group 'magpt)
 
@@ -944,15 +944,16 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
           `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged))
         ;; Magit dispatch: add Phase 2 entries (Recommend). Appended at end.
         (when (featurep 'transient)
-          (transient-append-suffix 'magit-dispatch nil
+          ;; Append our entries after "!" (Run) in magit-dispatch to avoid transient API issues with nil position.
+          (transient-append-suffix 'magit-dispatch "!"
             `("e" ,(magpt--transient-desc "Explain status (magpt)") magpt-explain-status))
-          (transient-append-suffix 'magit-dispatch nil
+          (transient-append-suffix 'magit-dispatch "!"
             `("E" ,(magpt--transient-desc "Explain hunk/region (magpt)") magpt-explain-hunk-region))
-          (transient-append-suffix 'magit-dispatch nil
+          (transient-append-suffix 'magit-dispatch "!"
             `("S" ,(magpt--transient-desc "Stage by intent (magpt)") magpt-stage-by-intent))
-          (transient-append-suffix 'magit-dispatch nil
+          (transient-append-suffix 'magit-dispatch "!"
             `("A" ,(magpt--transient-desc "Apply last stage-by-intent (magpt)") magpt-stage-by-intent-apply-last))
-          (transient-append-suffix 'magit-dispatch nil
+          (transient-append-suffix 'magit-dispatch "!"
             `("R" ,(magpt--transient-desc "Range/PR summary (magpt)") magpt-range-summary))))
     (with-eval-after-load 'magit
       (transient-remove-suffix 'magit-commit "i")
@@ -968,7 +969,7 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
 ;; A Task encodes a flow: context → prompt → request → render/apply. This is the foundation
 ;; for the evolving assistant features beyond commit messages. It is optional and off by default.
 
-(defcustom magpt-enable-task-registry nil
+(defcustom magpt-enable-task-registry t
   "If non-nil, expose experimental task registry commands (assist tasks, panel)."
   :type 'boolean
   :group 'magpt)

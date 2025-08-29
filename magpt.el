@@ -330,6 +330,8 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (panel-no . "no or not JSON")
     (panel-actions . "Actions: [Insert disabled] [Apply disabled]")
     (panel-actions-apply-stage-intent . "Actions: [Apply: M-x magpt-stage-by-intent-apply-last]")
+    (panel-actions-commit-lint . "Actions: [Copy msg] [Preview msg] [Insert msg]")
+    (panel-actions-branch-name . "Actions: [Copy name] [Copy rationale] [Create branch]")
     (panel-json-opened . "Panel: opened response in JSON buffer")
     (panel-json-copied . "Panel: response copied to kill-ring")
     (panel-sep . "----------------------------------------")))
@@ -359,6 +361,8 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (panel-no . "нет или не JSON")
     (panel-actions . "Действия: [Вставка недоступна] [Применение недоступно]")
     (panel-actions-apply-stage-intent . "Действия: [Применить план стейджинга: M-x magpt-stage-by-intent-apply-last]")
+    (panel-actions-commit-lint . "Действия: [Скопировать сообщение] [Предпросмотр] [Вставить сообщение]")
+    (panel-actions-branch-name . "Действия: [Скопировать имя] [Скопировать обоснование] [Создать ветку]")
     (panel-json-opened . "Панель: ответ открыт в JSON буфере")
     (panel-json-copied . "Панель: ответ скопирован в kill-ring")
     (panel-sep . "----------------------------------------")))
@@ -1153,6 +1157,10 @@ We try several common anchors; if none match, we silently skip."
     (cond
      ((and (eq task 'stage-by-intent) valid magpt-allow-apply-safe-ops)
       (magpt--i18n 'panel-actions-apply-stage-intent))
+     ((eq task 'commit-lint-suggest)
+      (magpt--i18n 'panel-actions-commit-lint))
+     ((eq task 'branch-name-suggest)
+      (magpt--i18n 'panel-actions-branch-name))
      (t
       (magpt--i18n 'panel-actions)))))
 
@@ -1273,6 +1281,87 @@ Keys:
     (magpt--btn-preview-text (format "Suggestion %s commands" (or idx "?"))
                              cmds 'shell)))
 
+;; Commit Lint/Fix — helpers
+
+(defun magpt--panel-extract-commit-lint-message (entry)
+  "Return suggestion.message from commit-lint-suggest ENTRY, or nil."
+  (let* ((data (magpt--panel-parse-json-safe entry))
+         (sug  (and (alist-get 'suggestion data) (alist-get 'suggestion data)))
+         (msg  (and (alist-get 'message sug) (alist-get 'message sug))))
+    (and (stringp msg) msg)))
+
+(defun magpt--btn-copy-commit-message (button)
+  "Copy suggested commit message from commit-lint-suggest entry."
+  (let* ((e (button-get button 'magpt-entry))
+         (msg (magpt--panel-extract-commit-lint-message e)))
+    (if (stringp msg)
+        (progn (kill-new msg) (message "%s" (magpt--i18n 'panel-json-copied)))
+      (user-error "No suggested message in this entry"))))
+
+(defun magpt--btn-preview-commit-message (button)
+  "Preview suggested commit message in a read-only buffer."
+  (let* ((e (button-get button 'magpt-entry))
+         (msg (magpt--panel-extract-commit-lint-message e)))
+    (if (stringp msg)
+        (magpt--btn-preview-text "Commit Lint suggestion" msg 'text)
+      (user-error "No suggested message in this entry"))))
+
+(defun magpt--btn-insert-commit-message (button)
+  "Insert suggested commit message into a live commit buffer (with confirmation)."
+  (let* ((e (button-get button 'magpt-entry))
+         (msg (magpt--panel-extract-commit-lint-message e))
+         (target (or (and (magpt--commit-buffer-p) (current-buffer))
+                     (magpt--find-commit-buffer))))
+    (unless (stringp msg) (user-error "No suggested message in this entry"))
+    (unless target (user-error "No commit buffer found"))
+    (if (magpt--insert-into-commit-buffer-target target msg)
+        (message "%s" (magpt--i18n 'inserted-into-commit-buffer))
+      (message "%s" (magpt--i18n 'insertion-cancelled)))))
+
+;; Branch Name Suggest — helpers
+
+(defun magpt--panel-extract-branch-name (entry)
+  "Return branch name string from branch-name-suggest ENTRY, or nil."
+  (let* ((data (magpt--panel-parse-json-safe entry))
+         (name (alist-get 'name data)))
+    (and (stringp name) (> (length name) 0) name)))
+
+(defun magpt--panel-extract-branch-rationale (entry)
+  "Return rationale string from branch-name-suggest ENTRY, or nil."
+  (let* ((data (magpt--panel-parse-json-safe entry))
+         (rat (alist-get 'rationale data)))
+    (and (stringp rat) rat)))
+
+(defun magpt--btn-copy-branch-name (button)
+  "Copy suggested branch name."
+  (let* ((e (button-get button 'magpt-entry))
+         (name (magpt--panel-extract-branch-name e)))
+    (if (stringp name)
+        (progn (kill-new name) (message "%s" (magpt--i18n 'panel-json-copied)))
+      (user-error "No branch name available"))))
+
+(defun magpt--btn-copy-branch-rationale (button)
+  "Copy branch rationale text."
+  (let* ((e (button-get button 'magpt-entry))
+         (rat (magpt--panel-extract-branch-rationale e)))
+    (if (stringp rat)
+        (progn (kill-new rat) (message "%s" (magpt--i18n 'panel-json-copied)))
+      (user-error "No rationale available"))))
+
+(defun magpt--btn-create-branch (button)
+  "Create branch from suggestion (git switch -c NAME), gated by magpt-allow-apply-safe-ops."
+  (unless magpt-allow-apply-safe-ops
+    (user-error "Applying operations is disabled (magpt-allow-apply-safe-ops is nil)"))
+  (let* ((e (button-get button 'magpt-entry))
+         (name (magpt--panel-extract-branch-name e)))
+    (unless (stringp name) (user-error "No branch name available"))
+    (when (y-or-n-p (format "Create and switch to branch '%s'? " name))
+      (condition-case err
+          (let ((root (magpt--project-root)))
+            (magpt--git root "switch" "-c" name)
+            (message "magpt: created and switched to %s" name))
+        (error (user-error "Git error: %s" (error-message-string err)))))))
+
 (defun magpt--panel-render-explain-status-pretty (entry)
   "Pretty rendering for explain-status ENTRY: summary, risks, suggestions."
   (let* ((note (or (plist-get entry :note) ""))
@@ -1318,6 +1407,91 @@ Keys:
                                      'magpt-suggestion-commands cmds)
                    (insert "\n")))
       (insert "  (no suggestions)\n"))
+    (insert "\n")))
+
+(defun magpt--panel-render-commit-lint-pretty (entry)
+  "Pretty rendering for commit-lint-suggest ENTRY."
+  (let* ((data (magpt--panel-parse-json-safe entry))
+         (status (alist-get 'status data))
+         (issues (or (alist-get 'issues data) '()))
+         (sug (alist-get 'suggestion data))
+         (msg (and sug (alist-get 'message sug))))
+    (insert (propertize "Lint status:\n" 'face 'magpt-panel-section-face))
+    (insert (or (and (stringp status) status) "(unknown)") "\n\n")
+    (insert (propertize "Issues:\n" 'face 'magpt-panel-section-face))
+    (if (and (listp issues) (> (length issues) 0))
+        (dolist (it issues) (insert "  • " (format "%s" it) "\n"))
+      (insert "  • none\n"))
+    (insert "\n")
+    (insert (propertize "Suggestion:\n" 'face 'magpt-panel-section-face))
+    (if (stringp msg)
+        (progn
+          (dolist (ln (split-string (string-trim-right msg) "\n"))
+            (insert "  " ln "\n"))
+          (insert "    ")
+          (make-text-button "[Copy msg]" nil
+                            'action #'magpt--btn-copy-commit-message
+                            'follow-link t
+                            'help-echo "Copy suggested commit message"
+                            'magpt-entry entry)
+          (insert "  ")
+          (make-text-button "[Preview msg]" nil
+                            'action #'magpt--btn-preview-commit-message
+                            'follow-link t
+                            'help-echo "Preview suggested commit message"
+                            'magpt-entry entry)
+          (insert "  ")
+          (make-text-button "[Insert msg]" nil
+                            'action #'magpt--btn-insert-commit-message
+                            'follow-link t
+                            'help-echo "Insert into commit buffer (with confirmation)"
+                            'magpt-entry entry)
+          (insert "\n"))
+      (insert "  (no suggestion message)\n"))
+    (insert "\n")))
+
+(defun magpt--panel-render-branch-name-pretty (entry)
+  "Pretty rendering for branch-name-suggest ENTRY."
+  (let* ((data (magpt--panel-parse-json-safe entry))
+         (name (alist-get 'name data))
+         (alts (or (alist-get 'alternatives data) '()))
+         (rat  (alist-get 'rationale data)))
+    (insert (propertize "Name:\n" 'face 'magpt-panel-section-face))
+    (insert (or (and (stringp name) name) "(no name)") "\n")
+    (when (stringp name)
+      (insert "    ")
+      (make-text-button "[Copy name]" nil
+                        'action #'magpt--btn-copy-branch-name
+                        'follow-link t
+                        'help-echo "Copy suggested branch name"
+                        'magpt-entry entry)
+      (when magpt-allow-apply-safe-ops
+        (insert "  ")
+        (make-text-button "[Create branch]" nil
+                          'action #'magpt--btn-create-branch
+                          'follow-link t
+                          'help-echo "git switch -c <name>"
+                          'magpt-entry entry))
+      (insert "\n"))
+    (insert "\n")
+    (insert (propertize "Alternatives:\n" 'face 'magpt-panel-section-face))
+    (if (and (listp alts) (> (length alts) 0))
+        (dolist (n alts) (insert "  • " (format "%s" n) "\n"))
+      (insert "  • none\n"))
+    (insert "\n")
+    (insert (propertize "Rationale:\n" 'face 'magpt-panel-section-face))
+    (if (stringp rat)
+        (progn
+          (dolist (ln (split-string (string-trim-right rat) "\n"))
+            (insert "  " ln "\n"))
+          (insert "    ")
+          (make-text-button "[Copy rationale]" nil
+                            'action #'magpt--btn-copy-branch-rationale
+                            'follow-link t
+                            'help-echo "Copy rationale"
+                            'magpt-entry entry)
+          (insert "\n"))
+      (insert "  (no rationale)\n"))
     (insert "\n")))
 
 (defun magpt-panel-toggle-pretty ()
@@ -1561,6 +1735,45 @@ Relies on 'magpt-entry text property."
                          'action #'magpt--btn-check-patch
                          'follow-link t
                          'help-echo "Validate patch with git apply --check"
+                         'magpt-entry entry))
+      ('commit-lint-suggest
+       (insert "  ")
+       (make-text-button "[Copy msg]" nil
+                         'action #'magpt--btn-copy-commit-message
+                         'follow-link t
+                         'help-echo "Copy suggested commit message"
+                         'magpt-entry entry)
+       (insert "  ")
+       (make-text-button "[Preview msg]" nil
+                         'action #'magpt--btn-preview-commit-message
+                         'follow-link t
+                         'help-echo "Preview suggested commit message"
+                         'magpt-entry entry)
+       (insert "  ")
+       (make-text-button "[Insert msg]" nil
+                         'action #'magpt--btn-insert-commit-message
+                         'follow-link t
+                         'help-echo "Insert into commit buffer (with confirmation)"
+                         'magpt-entry entry))
+      ('branch-name-suggest
+       (insert "  ")
+       (make-text-button "[Copy name]" nil
+                         'action #'magpt--btn-copy-branch-name
+                         'follow-link t
+                         'help-echo "Copy suggested branch name"
+                         'magpt-entry entry)
+       (when magpt-allow-apply-safe-ops
+         (insert "  ")
+         (make-text-button "[Create branch]" nil
+                           'action #'magpt--btn-create-branch
+                           'follow-link t
+                           'help-echo "git switch -c <name>"
+                           'magpt-entry entry))
+       (insert "  ")
+       (make-text-button "[Copy rationale]" nil
+                         'action #'magpt--btn-copy-branch-rationale
+                         'follow-link t
+                         'help-echo "Copy rationale"
                          'magpt-entry entry)))
     (insert "\n")
     (put-text-property start (point) 'read-only t)))
@@ -1588,11 +1801,12 @@ Relies on 'magpt-entry text property."
                             (if (> (length req) 2000) (concat (substring req 0 2000) " …") req)))
             ;; Response
             (cond
-             ((and magpt--panel-pretty
-                   (eq task 'explain-status)
-                   valid
-                   (magpt--panel-parse-json-safe e))
+             ((and magpt--panel-pretty (eq task 'explain-status) valid (magpt--panel-parse-json-safe e))
               (magpt--panel-render-explain-status-pretty e))
+             ((and magpt--panel-pretty (eq task 'commit-lint-suggest) valid (magpt--panel-parse-json-safe e))
+              (magpt--panel-render-commit-lint-pretty e))
+             ((and magpt--panel-pretty (eq task 'branch-name-suggest) valid (magpt--panel-parse-json-safe e))
+              (magpt--panel-render-branch-name-pretty e))
              (t
               (insert (magpt--i18n 'panel-response) "\n")
               (insert (string-trim-right resp) "\n\n")))
@@ -2323,15 +2537,37 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
     (transient-setup 'magpt-ai-actions))
   (message "magpt: AI actions reloaded from panel"))
 
+;; Quick numeric preview helpers (1..9) for AI actions transient
+(defun magpt-ai-actions-preview-1 () (interactive) (magpt-ai-actions-preview 0))
+(defun magpt-ai-actions-preview-2 () (interactive) (magpt-ai-actions-preview 1))
+(defun magpt-ai-actions-preview-3 () (interactive) (magpt-ai-actions-preview 2))
+(defun magpt-ai-actions-preview-4 () (interactive) (magpt-ai-actions-preview 3))
+(defun magpt-ai-actions-preview-5 () (interactive) (magpt-ai-actions-preview 4))
+(defun magpt-ai-actions-preview-6 () (interactive) (magpt-ai-actions-preview 5))
+(defun magpt-ai-actions-preview-7 () (interactive) (magpt-ai-actions-preview 6))
+(defun magpt-ai-actions-preview-8 () (interactive) (magpt-ai-actions-preview 7))
+(defun magpt-ai-actions-preview-9 () (interactive) (magpt-ai-actions-preview 8))
+
 (when (featurep 'transient)
   (transient-define-prefix magpt-ai-actions ()
     "AI actions (from last Explain Status result)"
-    [["Suggestions"
+    [["Quick (preview)"
+      ("1" "Preview #1" magpt-ai-actions-preview-1)
+      ("2" "Preview #2" magpt-ai-actions-preview-2)
+      ("3" "Preview #3" magpt-ai-actions-preview-3)
+      ("4" "Preview #4" magpt-ai-actions-preview-4)
+      ("5" "Preview #5" magpt-ai-actions-preview-5)
+      ("6" "Preview #6" magpt-ai-actions-preview-6)
+      ("7" "Preview #7" magpt-ai-actions-preview-7)
+      ("8" "Preview #8" magpt-ai-actions-preview-8)
+      ("9" "Preview #9" magpt-ai-actions-preview-9)]
+     ["Suggestions"
       ("p" "Preview suggestion..." magpt-ai-actions-preview)
       ("y" "Copy suggestion..." magpt-ai-actions-copy)
       ("s" "Copy summary" magpt-ai-actions-copy-summary)]
      ["Panel/Tasks"
       ("o" "Open panel" magpt-show-panel)
+      ("t" "Toggle panel pretty" magpt-panel-toggle-pretty)
       ("g" "Get new recommendations (Explain Status)" magpt-explain-status)
       ("r" "Reload from panel" magpt-ai-actions-reload)]]))
 

@@ -461,25 +461,25 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
   "Return the path to the git executable or nil."
   (executable-find "git"))
 
-;; Per-repo недавний вывод git (stdout/stderr), для подсказок Explain Status.
+;; Per-repo recent git output (stdout/stderr), for Explain Status suggestions.
 (defcustom magpt-recent-git-output-lines 80
-  "Сколько последних строк сохранять из вывода git на репозиторий."
+  "How many last lines of Git output to keep per repository."
   :type 'integer
   :group 'magpt)
 
 (defvar magpt--recent-git-output-map (make-hash-table :test 'equal)
-  "Карта ROOT-KEY → последние строки вывода git (строка с переводами).")
+  "Map ROOT-KEY → last lines of git output (newline-separated string).")
 
 (defun magpt--recent-git--key (dir)
-  "Вернуть ключ для карты недавнего вывода по каталогу DIR."
+  "Return the map key for recent output by directory DIR."
   (file-name-as-directory (expand-file-name (or dir default-directory))))
 
 (defun magpt--recent-git-output-get (dir)
-  "Вернуть сохранённый недавний вывод для каталога DIR (как строку)."
+  "Return saved recent output for directory DIR (as a string)."
   (or (gethash (magpt--recent-git--key dir) magpt--recent-git-output-map) ""))
 
 (defun magpt--recent-git-output-append (dir exit args out)
-  "Добавить в журнал для DIR запись с EXIT, командой ARGS и выводом OUT."
+  "Append an entry for DIR to the log with EXIT, command ARGS, and output OUT."
   (let* ((key (magpt--recent-git--key dir))
          (hdr (format "%d git %s" exit (mapconcat #'identity args " ")))
          (lines (append (list hdr)
@@ -504,7 +504,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
                (dur (- (float-time) start)))
           (magpt--log "process-git: end exit=%s dur=%.3fs bytes=%d"
                       exit dur (length trimmed))
-          ;; Запишем в per-repo журнал (для Explain Status → RECENT GIT OUTPUT)
+          ;; Record into per-repo log (for Explain Status → RECENT GIT OUTPUT)
           (ignore-errors (magpt--recent-git-output-append default-directory exit args trimmed))
           (cons exit trimmed))))))
 
@@ -2116,12 +2116,12 @@ Keys are resolved from `magit-status-mode-map' and Transient suffixes when avail
 Return (data preview bytes). DATA is a plist with :status, :recent-git-output, and optional :magit-keys."
   (let* ((root (magpt--project-root)))
     (magpt--log "ctx-status: root=%s begin" root)
-    ;; Буквально porcelain для легенды XY (для точной интерпретации индекс/ворктри).
+    ;; Raw porcelain for XY legend (for precise index/worktree interpretation).
     (magpt--log "ctx-status: calling: git status --porcelain")
     (let* ((porc (magpt--git root "status" "--porcelain"))
            (short (string-join (seq-take (split-string porc "\n" t) 200) "\n")))
       (magpt--log "ctx-status: porcelain lines=%d" (length (split-string short "\n" t)))
-      ;; Дополнительно обновим per-repo журнал: короткий человеческий статус с ветками.
+      ;; Additionally update per-repo log: short human-readable status with branches.
       (magpt--log "ctx-status: calling: git status -sb")
       (let* ((_ignore (ignore-errors (magpt--git root "status" "-sb"))))
         (magpt--log "ctx-status: recent-get begin")
@@ -2328,7 +2328,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                   :prompt-fn  #'magpt--prompt-explain-status
                   :render-fn  #'magpt--render-explain-status
                   :apply-fn   nil
-                  :confirm-send? nil)) ;; Explain Status безопасен — подтверждение не требуется
+                  :confirm-send? nil)) ;; Explain Status is safe — no confirmation required
     (magpt-register-task
      (magpt--task :name 'commit-lint-suggest
                   :title "Commit Lint / Fix Suggest"
@@ -2374,7 +2374,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
         (magpt-run-task 'explain-status)
         (magpt--log "explain-status: run-task dispatched"))
     (quit
-     ;; Закрытие/отмена Transient — не шумим в логах.
+     ;; Closing/cancelling Transient — keep logs quiet.
      (magpt--log "explain-status: quit (transient closed)"))
     (error
      (let* ((emsg (condition-case _ (error-message-string magpt--e)
@@ -2589,7 +2589,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                       (error nil))))
               (when stale
                 (insert (format "  %s\n" (magpt--i18n 'overview-stale)))))
-            ;; Inline Explain Status: Сводка/Риски/Рекомендации как дочерние секции AI overview
+            ;; Inline Explain Status: Summary/Risks/Suggestions as child sections of AI overview
             (let* ((data (magpt--entry-parse-json-safe ex))
                    (summary (and data (alist-get 'summary data)))
                    (risks (and data (alist-get 'risks data)))
@@ -2619,7 +2619,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                       (i 1))
                   (magit-insert-section (magit-section 'magpt-ai-explain-suggestions)
                     (magit-insert-heading (magpt--i18n 'overview-suggestions))
-                    ;; Прячем детали подсекций по умолчанию; раскрывайте TAB на строке рекомендации
+                    ;; Hide subsection details by default; expand with TAB on the suggestion line
                     (let ((magit-section-initial-visibility-alist
                            (cons (cons 'magpt-ai-suggestion 'hide)
                                  magit-section-initial-visibility-alist)))
@@ -2632,7 +2632,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                                        (and (listp c) (seq-filter #'stringp c))))
                                (git-cmd (and cmds (seq-find (lambda (c) (string-prefix-p "git " c)) cmds)))
                                (first-cmd (or git-cmd (car cmds))))
-                          ;; Подсекция на каждый пункт: заголовок виден всегда, детали — при раскрытии (TAB)
+                          ;; Subsection per item: heading always visible, details shown when expanded (TAB)
                           (magit-insert-section (magit-section 'magpt-ai-suggestion (list :index i :data s))
                             (magit-insert-heading
                               (format "  %d) %s%s"
@@ -2644,15 +2644,15 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                               (insert-text-button "[Eshell]"
                                                   'action #'magpt--btn-eshell-insert
                                                   'follow-link t
-                                                  'help-echo "Вставить команду в eshell (попап снизу)"
+                                                  'help-echo "Insert command into eshell (bottom popup)"
                                                   'magpt-command first-cmd)
                               (insert "\n")))
                           (setq i (1+ i)))))
                     (when (and compact (> (length sugs) (length ss)))
                       (insert (format "  … %d more (open JSON)\n" (- (length sugs) (length ss)))))))
-                ;; Кнопки только один раз для всего explain-status
+                ;; Buttons only once for the entire explain-status
                 (magpt--insert-entry-buttons ex))
-              ;; Если невалидный или пустой — фоллбек
+              ;; Fallback if invalid or empty
               (unless (and (plist-get ex :valid) (magpt--entry-parse-json-safe ex))
                 (insert (magpt--i18n 'overview-response) "\n")
                 (insert (string-trim-right (plist-get ex :response)) "\n\n")

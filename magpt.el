@@ -1591,8 +1591,9 @@ When called interactively without ENTRY, try entry at point or the latest."
     (insert "\n")
     (put-text-property start (point) 'read-only t)))
 
-(defun magpt--history-append-entry (task request response &optional note)
-  "Append an entry to history for TASK and refresh Magit AI overview if visible."
+(defun magpt--history-append-entry (task request response &optional note &rest kvs)
+  "Append an entry to history for TASK and refresh Magit AI overview if visible.
+Extra KV pairs can be provided in KVS to extend the stored plist."
   (let* ((resp-raw (magpt--response->string (or response "")))
          (resp (magpt--sanitize-response resp-raw))
          (looks-like-json (string-match-p "\\`[ \t\n]*[{\\[]" resp))
@@ -1607,6 +1608,8 @@ When called interactively without ENTRY, try entry at point or the latest."
                       :response resp
                       :valid json-valid
                       :note note)))
+    ;; Extend entry with any extra kvs (e.g., :status-snapshot).
+    (when kvs (setq entry (append entry kvs)))
     (push entry magpt--history-entries)
     (magpt--log "history: task=%s json?=%s valid=%s resp-preview=%s"
                 task looks-like-json json-valid
@@ -2148,15 +2151,43 @@ Keys are resolved from `magit-status-mode-map' and Transient suffixes when avail
                 (- (float-time) start) (length out))
     out))
 
+(defun magpt--porcelain-parse (porc)
+  "Parse 'git status --porcelain' into staged/unstaged/untracked file lists."
+  (let (staged unstaged untracked)
+    (dolist (l (split-string (or porc "") "\n" t))
+      (when (string-match "\\`\\([ MADRCU?]\\)\\([ MADRCU?]\\) \\(.*\\)\\'" l)
+        (let ((x (match-string 1 l))
+              (y (match-string 2 l))
+              (path (match-string 3 l)))
+          (cond
+           ;; Untracked
+           ((and (string= x "?") (string= y "?"))
+            (push path untracked))
+           (t
+            ;; Any non-space X means there is something staged for this path.
+            (when (not (string= x " "))
+              (push path staged))
+            ;; Any non-space Y means there is something unstaged in worktree.
+            (when (not (string= y " "))
+              (push path unstaged)))))))
+    (list :staged (nreverse staged)
+          :unstaged (nreverse unstaged)
+          :untracked (nreverse untracked))))
+
 (defun magpt--ctx-status (_ctx)
   "Collect minimal git status for explain-status task, recent git output, plus Magit keys (optional).
-Return (data preview bytes). DATA is a plist with :status, :recent-git-output, and optional :magit-keys."
+Return (data preview bytes). DATA is a plist with :status, :recent-git-output, optional :magit-keys,
+and parsed lists :staged-files, :unstaged-files, :untracked-files."
   (let* ((root (magpt--project-root)))
     (magpt--log "ctx-status: root=%s begin" root)
     ;; Raw porcelain for XY legend (for precise index/worktree interpretation).
     (magpt--log "ctx-status: calling: git status --porcelain")
     (let* ((porc (magpt--git root "status" "--porcelain"))
-           (short (string-join (seq-take (split-string porc "\n" t) 200) "\n")))
+           (short (string-join (seq-take (split-string porc "\n" t) 200) "\n"))
+           (parsed (magpt--porcelain-parse porc))
+           (staged   (plist-get parsed :staged))
+           (unstaged (plist-get parsed :unstaged))
+           (untracked (plist-get parsed :untracked)))
       (magpt--log "ctx-status: porcelain lines=%d" (length (split-string short "\n" t)))
       ;; Additionally update per-repo log: short human-readable status with branches.
       (magpt--log "ctx-status: calling: git status -sb")
@@ -2193,7 +2224,12 @@ Return (data preview bytes). DATA is a plist with :status, :recent-git-output, a
                             (length (split-string recent-trunc "\n" t))
                             (if (and keys (not (string-empty-p keys))) "t" "nil")
                             bytes)
-                (list (list :status short :magit-keys keys :recent-git-output recent-trunc)
+                (list (list :status short
+                            :magit-keys keys
+                            :recent-git-output recent-trunc
+                            :staged-files staged
+                            :unstaged-files unstaged
+                            :untracked-files untracked)
                       preview bytes)))))))))
 
 (defun magpt--prompt-explain-status (status-or-data)
@@ -2207,6 +2243,12 @@ Be sure to consider all messages, errors, hints and warnings present in the 'REC
                              (plist-get status-or-data :recent-git-output)))
          (keys   (and (not (stringp status-or-data))
                       (plist-get status-or-data :magit-keys)))
+         (staged-files   (and (not (stringp status-or-data))
+                              (plist-get status-or-data :staged-files)))
+         (unstaged-files (and (not (stringp status-or-data))
+                              (plist-get status-or-data :unstaged-files)))
+         (untracked-files (and (not (stringp status-or-data))
+                               (plist-get status-or-data :untracked-files)))
          (have-keys (and keys (stringp keys) (> (length keys) 0)))
          (keys-block
           (if have-keys
@@ -2215,6 +2257,22 @@ Be sure to consider all messages, errors, hints and warnings present in the 'REC
                "If no suitable action exists, use [].\n"
                "--- BEGIN MAGIT KEYS HELP ---\n" keys "\n--- END MAGIT KEYS HELP ---\n")
             "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n"))
+         (facts-block
+          (let* ((sf (and (listp staged-files) staged-files))
+                 (uf (and (listp unstaged-files) unstaged-files))
+                 (uf2 (and (listp untracked-files) untracked-files)))
+            (format (concat
+                     "Authoritative facts derived from porcelain (do NOT contradict these):\n"
+                     "- If a file is in STAGED FILES and NOT in UNSTAGED FILES, it MUST NOT be called 'unstaged', and you MUST NOT suggest 'git add' for it.\n"
+                     "- Only files listed in UNSTAGED FILES may need 'git add'.\n\n"
+                     "--- BEGIN FACTS ---\n"
+                     "STAGED FILES (%d):\n%s\n\n"
+                     "UNSTAGED FILES (%d):\n%s\n\n"
+                     "UNTRACKED FILES (%d):\n%s\n"
+                     "--- END FACTS ---\n")
+                    (length sf) (if (and sf (> (length sf) 0)) (string-join sf "\n") "(none)")
+                    (length uf) (if (and uf (> (length uf) 0)) (string-join uf "\n") "(none)")
+                    (length uf2) (if (and uf2 (> (length uf2) 0)) (string-join uf2 "\n") "(none)"))))
          (recent-block
           (if (and (stringp recent-output) (> (length recent-output) 0))
               (format "\n--- RECENT GIT OUTPUT ---\n%s\n--- END RECENT GIT OUTPUT ---\n" recent-output)
@@ -2235,7 +2293,8 @@ Be sure to consider all messages, errors, hints and warnings present in the 'REC
              "- Interpret Git status codes (see legend), but if there is recent command output with errors/hints/pending steps — PRIORITIZE analyzing that output."
              " Provide solutions and warnings based on the actual messages.\n"
              "- For example: editor needs to be closed, pull conflicts, choosing rebase/merge strategy, etc.\n"
-             "- Never suggest stage/unstage for changes already staged\n"
+             "- Never suggest stage/unstage for changes already staged.\n"
+             "- Use the FACTS block below as authoritative truth when deciding whether a file is staged or unstaged.\n"
              "- For a commit with an AI-generated message prefer [c i] if available; otherwise [c c].\n"
              "%s"
              "\n--- BEGIN STATUS ---\n%s\n--- END STATUS ---\n"
@@ -2252,11 +2311,12 @@ Be sure to consider all messages, errors, hints and warnings present in the 'REC
              "  U? or ?U or UU → merge conflict\n"
              "  ?? file   → untracked file\n"
              "--- END GIT PORCELAIN LEGEND ---\n")
-            ilang keys-block status recent-block)))
+            ilang keys-block facts-block status recent-block)))
 
-(defun magpt--render-explain-status (json _data)
+(defun magpt--render-explain-status (json data)
   (magpt--history-append-entry 'explain-status (or magpt--current-request "") (or json "")
-                               "JSON schema: {summary, risks[], suggestions[].commands[], suggestions[].keys[]}"))
+                               "JSON schema: {summary, risks[], suggestions[].commands[], suggestions[].keys[]}"
+                               :status-snapshot (or (and (listp data) (plist-get data :status)) "")))
 
 ;; Commit Lint/Fix Suggest
 
@@ -2599,6 +2659,12 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
       (when (string-match re request)
         (string-trim-right (match-string 1 request))))))
 
+(defun magpt--status-lines-equal-p (a b)
+  "Return non-nil if porcelain snapshots A and B are equivalent ignoring order and blank lines."
+  (let* ((sa (sort (split-string (or (string-trim a) "") "\n" t) #'string<))
+         (sb (sort (split-string (or (string-trim b) "") "\n" t) #'string<)))
+    (equal sa sb)))
+
 (defun magpt-magit-insert-ai-overview ()
   "Insert a compact 'AI overview (magpt)' section into magit-status."
   (when (and magpt-magit-overview-enabled
@@ -2617,12 +2683,14 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
           (progn
             (let* ((stale
                     (condition-case _
-                        (let* ((req (plist-get ex :request))
-                               (old (and (stringp req) (magpt--request-extract-status req)))
+                        (let* ((snapshot (plist-get ex :status-snapshot))
+                               (req (plist-get ex :request))
+                               (old (or snapshot
+                                        (and (stringp req) (magpt--request-extract-status req))))
                                (root (magpt--project-root))
                                (porc (magpt--git root "status" "--porcelain"))
                                (cur (string-join (seq-take (split-string porc "\n" t) 200) "\n")))
-                          (and old (not (string= (string-trim old) (string-trim cur)))))
+                          (and old (not (magpt--status-lines-equal-p old cur))))
                       (error nil))))
               (when stale
                 (insert (format "  %s\n" (magpt--i18n 'overview-stale)))))

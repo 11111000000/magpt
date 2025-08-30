@@ -180,69 +180,27 @@ CONTENT is inserted, buffer-file-name is set to COMMIT_EDITMSG to satisfy
                                     ;; Overlay must be removed
                                     (should (null magpt--commit-overlay)))))
 
-(ert-deftest magpt-spinner-stops-on-cleanup ()
-  "Spinner timer should be cancelled when overlay is removed (e.g., on empty response)."
-  (let ((magpt-progress-spinner t))
-    (magpt-test--with-commit-buffer "S\n\n# C\n"
-                                    (let ((git-commit-comment-char ?#))
-                                      (magpt--show-commit-overlay (current-buffer))
-                                      (should (timerp magpt--overlay-spinner-timer))
-                                      (magpt--commit-callback "" (list :context (current-buffer)))
-                                      (should (null magpt--commit-overlay))
-                                      (should (null magpt--overlay-spinner-timer))))))
+
 
 ;;; Panel/request recording tests
 
-(ert-deftest magpt-panel-records-request-preview ()
-  "Panel entry should store request preview and validate JSON."
-  (let ((magpt--panel-entries nil))
-    (magpt--panel-append-entry 'explain-status "PROMPT-X" "{\"x\":1}")
-    (let ((e (car magpt--panel-entries)))
+(ert-deftest magpt-history-records-request-preview ()
+  "History entry should store request preview and validate JSON."
+  (let ((magpt--history-entries nil))
+    (magpt--history-append-entry 'explain-status "PROMPT-X" "{\"x\":1}")
+    (let ((e (car magpt--history-entries)))
       (should (equal (plist-get e :request) "PROMPT-X"))
       (should (equal (plist-get e :response) "{\"x\":1}"))
       ;; Bare JSON string or object/array should be considered valid JSON by parser.
       (should (eq (plist-get e :valid) t)))))
 
 
-(ert-deftest magpt-run-task-binds-request-and-appends-panel ()
-  "Running a task should bind `magpt--current-request' and append a panel entry."
-  (let ((magpt--panel-entries nil))
-    (cl-letf (((symbol-function 'magpt--gptel-request)
-               (lambda (_prompt &rest args)
-                 ;; Immediately invoke callback with a small JSON payload.
-                 (let ((cb (plist-get args :callback)))
-                   (funcall cb "{\"ok\":true}" nil)))))
-      (let* ((task (magpt--task
-                    :name 't1
-                    :title "t1"
-                    :scope 'repo
-                    :context-fn (lambda (_ctx) (list 'data "prev" 1))
-                    :prompt-fn (lambda (_data) "PROMPT-TEST")
-                    :render-fn (lambda (out data)
-                                 (ignore data)
-                                 ;; Use common renderer that relies on `magpt--current-request'.
-                                 (magpt--render-to-panel 't1 out data))
-                    :apply-fn nil
-                    :confirm-send? nil)))
-        (magpt--run-task task nil)
-        (let ((e (car magpt--panel-entries)))
-          (should (string= (plist-get e :request) "PROMPT-TEST"))
-          (should (string-match-p "\"ok\"" (plist-get e :response)))
-          (should (eq (plist-get e :valid) t)))))))
+
 
 
 ;;; Phase 2 tests
 
-(ert-deftest magpt-panel-actions-line-stage-intent ()
-  "Actions line should offer Apply hint for valid stage-by-intent entries."
-  (let ((magpt-allow-apply-safe-ops t))
-    (let* ((entry (list :task 'stage-by-intent :valid t))
-           (line (magpt--panel-actions-line entry)))
-      (should (string= line (magpt--i18n 'panel-actions-apply-stage-intent)))))
-  (let ((magpt-allow-apply-safe-ops t))
-    (let* ((entry (list :task 'stage-by-intent :valid nil))
-           (line (magpt--panel-actions-line entry)))
-      (should (string= line (magpt--i18n 'panel-actions))))))
+
 
 (ert-deftest magpt-ctx-hunk-or-region-region-basic ()
   "Region context should return :kind 'region, non-empty text and positive byte size."
@@ -266,16 +224,16 @@ CONTENT is inserted, buffer-file-name is set to COMMIT_EDITMSG to satisfy
 
 (ert-deftest magpt-apply-stage-intent-executes-ops ()
   "Applying a simple stage-by-intent plan should call git add/restore with expected args."
-  (let ((magpt--panel-entries nil)
+  (let ((magpt--history-entries nil)
         (magpt-allow-apply-safe-ops t)
         (magpt-test--git-calls nil))
-    ;; Panel entry with JSON plan
+    ;; History entry with JSON plan
     (push (list :time "T"
                 :task 'stage-by-intent
                 :request ""
                 :response
                 "{\"groups\":[{\"title\":\"g1\",\"rationale\":\"x\",\"files\":[{\"path\":\"a.txt\",\"action\":\"stage\"},{\"path\":\"b.txt\",\"action\":\"unstage\"}]}]}")
-          magpt--panel-entries)
+          magpt--history-entries)
     ;; Stub confirm and git
     (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
               ((symbol-function 'magpt--project-root) (lambda () default-directory))

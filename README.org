@@ -4,7 +4,7 @@
 :END:
 
 ** Vision / What and Why
-MaGPT augments everyday Git work in Emacs with practical, preview‑first assistance. It started as a high‑quality commit message generator and evolved into a small, extensible set of “tasks” that help you observe repository state, plan safe next steps, and keep full control. It is designed for developers who want reliable assistance without surprises: explicit confirmation before sending any content, reversible actions only, and seamless integration with Emacs, Magit, and gptel.
+ MaGPT augments everyday Git work in Emacs with practical, preview‑first assistance. It started as a high‑quality commit message generator and evolved into a small, extensible set of “tasks” that help you observe repository state, plan safe next steps, and keep full control. It is designed for developers who want reliable assistance without surprises: explicit confirmation before sending any content, reversible actions only, and seamless integration with Emacs, Magit, and gptel.
 
 ** Features
 MaGPT generates Conventional‑Commits‑friendly messages from your staged diff, adds a compact “AI overview” to Magit Status, and provides several safe, read‑only tasks like explaining current status, linting a commit message, or suggesting a branch name. When you need more, turn on the task registry to unlock “recommend” flows: explain a hunk or region, propose file‑level staging plans (with reversible “Apply”), summarize a commit range, or preview a minimal patch for conflict resolution. All AI interactions are asynchronous and logged; nothing is changed without an explicit preview and confirmation.

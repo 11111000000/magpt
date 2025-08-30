@@ -1901,8 +1901,6 @@ File-level only; asks for confirmation and shows explicit git commands."
 ;; These tasks are safe: they only observe and suggest; no mutations.
 ;; Results are appended to history and shown in the Magit AI Overview; basic validation hints included.
 
-
-
 ;; Explain Status
 
 (defun magpt--ctx-status (_ctx)
@@ -2169,17 +2167,6 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (when (featurep 'transient)
     (transient-setup 'magpt-ai-actions))
   (message "magpt: AI actions reloaded from overview"))
-
-;; Quick numeric preview helpers (1..9) for AI actions transient
-(defun magpt-ai-actions-preview-1 () (interactive) (magpt-ai-actions-preview 0))
-(defun magpt-ai-actions-preview-2 () (interactive) (magpt-ai-actions-preview 1))
-(defun magpt-ai-actions-preview-3 () (interactive) (magpt-ai-actions-preview 2))
-(defun magpt-ai-actions-preview-4 () (interactive) (magpt-ai-actions-preview 3))
-(defun magpt-ai-actions-preview-5 () (interactive) (magpt-ai-actions-preview 4))
-(defun magpt-ai-actions-preview-6 () (interactive) (magpt-ai-actions-preview 5))
-(defun magpt-ai-actions-preview-7 () (interactive) (magpt-ai-actions-preview 6))
-(defun magpt-ai-actions-preview-8 () (interactive) (magpt-ai-actions-preview 7))
-(defun magpt-ai-actions-preview-9 () (interactive) (magpt-ai-actions-preview 8))
 
 (when (featurep 'transient)
   (transient-define-prefix magpt-ai-actions ()

@@ -168,6 +168,11 @@ Transient keys:
   - g — Get new recommendations (Explain Status)
   - r — Reload actions from the overview
 
+Explain Status suggestions include Magit key sequences when known. Keys are shown inline in the Magit overview as “[keys: …]” and also in the AI actions preview header. The model receives a runtime Magit key cheatsheet extracted from your Magit keymaps and is instructed to only use keys from that list (or leave an empty keys array if none apply). You can toggle this behavior:
+
+#+begin_src emacs-lisp
+(setq magpt-include-magit-keys-in-suggestions t)  ; default is t
+
 ** Advanced/Tasks (enable via magpt-enable-task-registry)
 The task registry powers several read‑only and preview‑first operations:
 - Explain Status (explain current state; record summary, risks, and suggested commands).

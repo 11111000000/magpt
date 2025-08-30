@@ -65,7 +65,7 @@
 (defcustom magpt-model nil
   "LLM model name for gptel. If nil, uses gptel’s currently-selected default."
   :type '(choice (const :tag "Use gptel default model" nil)
-                 (string :tag "Explicit model name"))
+               (string :tag "Explicit model name"))
   :group 'magpt)
 
 (defcustom magpt-info-language "English"
@@ -77,7 +77,7 @@ Note: This does not translate Emacs UI; it only nudges the model via prompts."
 (defcustom magpt-commit-language nil
   "Preferred language for generated commit messages. If nil, no preference."
   :type '(choice (const :tag "No preference" nil)
-                 (string :tag "Language"))
+               (string :tag "Language"))
   :group 'magpt)
 
 (defcustom magpt-commit-prompt
@@ -97,7 +97,7 @@ Provide the final commit message only, no extra commentary."
   "Maximum UTF-8 byte size for the diff sent to the model.
 If nil, no limit. When truncated, boundaries respect UTF-8 and a note is added."
   :type '(choice (const :tag "No limit" nil)
-                 (integer :tag "Max bytes"))
+               (integer :tag "Max bytes"))
   :group 'magpt)
 
 (defcustom magpt-insert-into-commit-buffer t
@@ -112,9 +112,9 @@ Otherwise show results in a separate read-only buffer."
 - prefer-vc       : VC → Magit → project.el → default-directory check
 - prefer-project  : project.el → Magit → VC → default-directory check"
   :type '(choice
-          (const :tag "Prefer Magit" prefer-magit)
-          (const :tag "Prefer VC" prefer-vc)
-          (const :tag "Prefer project.el" prefer-project))
+        (const :tag "Prefer Magit" prefer-magit)
+        (const :tag "Prefer VC" prefer-vc)
+        (const :tag "Prefer project.el" prefer-project))
   :group 'magpt)
 
 (defcustom magpt-diff-args '("--staged" "--no-color")
@@ -145,7 +145,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
 (defcustom magpt-user-rc-file (expand-file-name "~/.magptrc")
   "Path to user-level magpt RC file. Loaded before project RC; project overrides."
   :type '(choice (const :tag "Disabled" nil)
-                 (file :tag "RC file path"))
+               (file :tag "RC file path"))
   :group 'magpt)
 
 (defvar magpt--user-rc-state nil
@@ -197,8 +197,8 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
                       ((stringp k) (intern k))
                       (t nil))))
            (when (and sym
-                      (string-prefix-p "magpt-" (symbol-name sym))
-                      (boundp sym))
+                   (string-prefix-p "magpt-" (symbol-name sym))
+                   (boundp sym))
              (set sym v))))))))
 
 (defun magpt--maybe-load-user-rc ()
@@ -208,18 +208,18 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
       (let* ((attr (file-attributes f))
              (mtime (when attr (file-attribute-modification-time attr))))
         (when (or (null magpt--user-rc-state)
-                  (not (equal (plist-get magpt--user-rc-state :path) f))
-                  (not (equal (plist-get magpt--user-rc-state :mtime) mtime)))
+                 (not (equal (plist-get magpt--user-rc-state :path) f))
+                 (not (equal (plist-get magpt--user-rc-state :mtime) mtime)))
           (let ((alist (magpt--read-rc f)))
             (setq magpt--user-rc-state (list :path f :mtime mtime :data alist))
             (magpt--apply-rc alist)
             (magpt--log "user rc loaded: %s keys=%s"
                         f (mapcar (lambda (kv)
-                                    (cond
-                                     ((consp kv) (symbol-name (car kv)))
-                                     ((symbolp kv) (symbol-name kv))
-                                     (t (format "%S" kv))))
-                                  (or alist '())))))))))
+                                   (cond
+                                    ((consp kv) (symbol-name (car kv)))
+                                    ((symbolp kv) (symbol-name kv))
+                                    (t (format "%S" kv))))
+                                 (or alist '())))))))))
 
 (defun magpt--maybe-load-project-rc ()
   "Load and apply project .magptrc if present and changed."
@@ -228,18 +228,18 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
       (let* ((attr (file-attributes f))
              (mtime (when attr (file-attribute-modification-time attr))))
         (when (or (null magpt--proj-rc-state)
-                  (not (equal (plist-get magpt--proj-rc-state :path) f))
-                  (not (equal (plist-get magpt--proj-rc-state :mtime) mtime)))
+                 (not (equal (plist-get magpt--proj-rc-state :path) f))
+                 (not (equal (plist-get magpt--proj-rc-state :mtime) mtime)))
           (let ((alist (magpt--read-rc f)))
             (setq magpt--proj-rc-state (list :path f :mtime mtime :data alist))
             (magpt--apply-rc alist)
             (magpt--log "project rc loaded: %s keys=%s"
                         f (mapcar (lambda (kv)
-                                    (cond
-                                     ((consp kv) (symbol-name (car kv)))
-                                     ((symbolp kv) (symbol-name kv))
-                                     (t (format "%S" kv))))
-                                  (or alist '())))))))))
+                                   (cond
+                                    ((consp kv) (symbol-name (car kv)))
+                                    ((symbolp kv) (symbol-name kv))
+                                    (t (format "%S" kv))))
+                                 (or alist '())))))))))
 
 (defun magpt--maybe-load-rc ()
   "Load and apply user RC then project RC; project overrides user."
@@ -273,7 +273,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
                          (apply #'format fmt args)
                        (error
                         (format "LOG-FMT-ERROR: fmt=%S args=%S err=%s"
-                                fmt args (error-message-string err))))))
+                              fmt args (error-message-string err))))))
           (insert (format "[%s] %s\n" ts line)))))))
 
 (defun magpt--backtrace-string ()
@@ -403,8 +403,8 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
            (first (car lines))
            (last  (car (last lines))))
       (when (and first last
-                 (string-match-p "\\`[`~]\\{3,\\}" first)
-                 (string-match-p "\\`[`~]\\{3,\\}[ \t]*\\'" last))
+              (string-match-p "\\`[`~]\\{3,\\}" first)
+              (string-match-p "\\`[`~]\\{3,\\}[ \t]*\\'" last))
         (setq s (mapconcat #'identity (butlast (cdr lines)) "\n"))))
     s))
 
@@ -420,8 +420,8 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
                         (error "<unprintable>"))))
         (magpt--log "safe-callback: resp-type=%S preview=%s info=%S"
                     ty preview (and (listp info)
-                                    (ignore-errors
-                                      (cl-subseq info 0 (min 10 (length info))))))))
+                                  (ignore-errors
+                                    (cl-subseq info 0 (min 10 (length info))))))))
     (condition-case err
         (funcall cb resp info)
       (error
@@ -1905,31 +1905,182 @@ File-level only; asks for confirmation and shows explicit git commands."
 
 ;; Explain Status
 
+(defcustom magpt-include-magit-keys-in-suggestions t
+  "If non-nil, include a dynamic Magit key cheatsheet in Explain Status prompts.
+The model is instructed to add a `keys' array to each suggestion with matching key
+sequences taken ONLY from the cheatsheet. If no suitable key exists, it should
+use an empty list instead of guessing."
+  :type 'boolean
+  :group 'magpt)
+
+(defun magpt--magit-keys-runtime ()
+  "Return an alist of (DESCRIPTION . (KEYS...)) for common Magit actions.
+Keys are resolved from `magit-status-mode-map' and Transient suffixes when available."
+  (when (and (featurep 'magit) (boundp 'magit-status-mode-map))
+    (let* ((map magit-status-mode-map))
+      (cl-labels
+          ((keys-for (fn)
+             (when (fboundp fn)
+               (mapcar #'key-description (where-is-internal fn map))))
+           (prefix-keys-for (prefix-fn)
+             (when (fboundp prefix-fn)
+               (mapcar #'key-description (where-is-internal prefix-fn map))))
+           (clean-keys (keys)
+             (delete-dups
+              (seq-filter (lambda (k)
+                            (and (stringp k)
+                                 (not (string-match-p "<menu-bar" k))))
+                          (seq-filter #'identity keys))))
+           (composite-keys (prefix-fn target-fn)
+             (when (and (featurep 'transient) (fboundp 'transient-get-suffixes))
+               (let* ((pkeys (prefix-keys-for prefix-fn))
+                      (suffixes (ignore-errors (transient-get-suffixes prefix-fn))))
+                 (when (and pkeys suffixes)
+                   (cl-loop for suf in suffixes
+                            for cmd = (ignore-errors (oref suf command))
+                            for skey = (ignore-errors (oref suf key))
+                            when (and (eq cmd target-fn)
+                                      (stringp skey) (> (length skey) 0))
+                            append (mapcar (lambda (pk) (format "%s %s" pk skey)) pkeys)))))))
+        (let* ((pairs
+                (list
+                 (cons "Stage selection"         (keys-for 'magit-stage))
+                 (cons "Unstage selection"       (keys-for 'magit-unstage))
+                 (cons "Stage all"               (keys-for 'magit-stage-modified))
+                 (cons "Unstage all"             (keys-for 'magit-unstage-all))
+                 (cons "Commit (create)"
+                       (or (keys-for 'magit-commit-create)
+                           (composite-keys 'magit-commit 'magit-commit-create)
+                           '("c c")))  ;; fallback
+                 (cons "Commit (amend)"
+                       (or (keys-for 'magit-commit-amend)
+                           (composite-keys 'magit-commit 'magit-commit-amend)
+                           '("c a")))  ;; fallback
+                 (cons "Commit with AI message (magpt)"
+                       (or (keys-for 'magpt-commit-staged)
+                           (composite-keys 'magit-commit 'magpt-commit-staged)
+                           '("c i")))  ;; fallback
+                 (cons "Push (to push-remote)"
+                       (or (keys-for 'magit-push-current)
+                           (keys-for 'magit-push)
+                           (composite-keys 'magit-push 'magit-push-current)))
+                 (cons "Fetch"
+                       (or (keys-for 'magit-fetch)
+                           (composite-keys 'magit-fetch 'magit-fetch)))
+                 (cons "Pull"
+                       (or (keys-for 'magit-pull)
+                           (composite-keys 'magit-pull 'magit-pull)))
+                 (cons "Switch branch"
+                       (or (keys-for 'magit-branch-checkout)
+                           (keys-for 'magit-checkout)
+                           (composite-keys 'magit-branch 'magit-branch-checkout)))
+                 (cons "Create branch"
+                       (or (keys-for 'magit-branch-and-checkout)
+                           (keys-for 'magit-branch-create)
+                           (composite-keys 'magit-branch 'magit-branch-and-checkout)
+                           (composite-keys 'magit-branch 'magit-branch-create)))
+                 (cons "Log (current)"
+                       (or (keys-for 'magit-log-current)
+                           (composite-keys 'magit-log 'magit-log-current)))
+                 (cons "Diff (working tree)"
+                       (or (keys-for 'magit-diff-working-tree)
+                           (keys-for 'magit-diff)
+                           (composite-keys 'magit-diff 'magit-diff-working-tree)))
+                 (cons "Stash"
+                       (or (keys-for 'magit-stash)
+                           (composite-keys 'magit-stash 'magit-stash)))
+                 (cons "Blame"                   (keys-for 'magit-blame))
+                 (cons "Rebase"
+                       (or (keys-for 'magit-rebase)
+                           (composite-keys 'magit-rebase 'magit-rebase)))))
+               out)
+          (dolist (p pairs)
+            (let* ((desc (car p))
+                   (ks (clean-keys (cdr p))))
+              (when ks
+                (push (cons desc ks) out))))
+          (nreverse out))))))
+
+(defun magpt--format-magit-keys-cheatsheet ()
+  "Format runtime Magit key bindings as a simple cheatsheet string."
+  (let ((alist (magpt--magit-keys-runtime)))
+    (if (null alist)
+        ""
+      (mapconcat
+       (lambda (pair)
+         (format "- %s: %s" (car pair) (mapconcat #'identity (cdr pair) ", ")))
+       alist "\n"))))
+
 (defun magpt--ctx-status (_ctx)
-  "Collect minimal git status for explain-status task.
-Return (data preview bytes)."
+  "Collect minimal git status for explain-status task, plus Magit keys (optional).
+Return (data preview bytes). DATA is a plist with :status and optional :magit-keys."
   (let* ((root (magpt--project-root))
          (porc (magpt--git root "status" "--porcelain"))
          (short (string-join (seq-take (split-string porc "\n" t) 200) "\n"))
-         (bytes (magpt--string-bytes short)))
-    (list short short bytes)))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet)))
+         (preview (if (and keys (not (string-empty-p keys)))
+                      (format "STATUS:\n%s\n\nMAGIT KEYS:\n%s"
+                            short
+                            (string-join (seq-take (split-string keys "\n" t) 50) "\n"))
+                    short))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :status short :magit-keys keys) preview bytes)))
 
-(defun magpt--prompt-explain-status (status)
-  "Build prompt for explain-status task. Use `magpt-info-language' for textual fields."
-  (format (concat
-           "You are a senior developer. Review the current Git status and propose next safe actions.\n"
-           "Return ONLY JSON with fields:\n"
-           "  summary: string,\n"
-           "  risks:   array of strings,\n"
-           "  suggestions: array of { title: string, commands: array of strings }\n"
-           "Answer STRICTLY in %s for all textual fields. No Markdown or extra prose outside JSON.\n\n"
-           "--- BEGIN STATUS ---\n%s\n--- END STATUS ---\n")
-          (or magpt-info-language "English")
-          status))
+(defun magpt--prompt-explain-status (status-or-data)
+  "Build prompt for explain-status. Use `magpt-info-language' for textual fields.
+If STATUS-OR-DATA is a plist with :status and :magit-keys, include a Magit keys
+cheatsheet section and instruct the model to add a `keys' array per suggestion."
+  (let* ((ilang (or magpt-info-language "English"))
+         (status (if (stringp status-or-data)
+                     status-or-data
+                   (or (plist-get status-or-data :status) "")))
+         (keys   (and (not (stringp status-or-data))
+                      (plist-get status-or-data :magit-keys)))
+         (have-keys (and keys (stringp keys) (> (length keys) 0))))
+    (format (concat
+             "You are a senior developer. Review the current Git status and propose next safe actions.\n"
+             "Return ONLY JSON with fields:\n"
+             "  summary: string,\n"
+             "  risks:   array of strings,\n"
+             "  suggestions: array of {\n"
+             "    title: string,\n"
+             "    commands: array of strings,\n"
+             "    keys: array of strings  // Magit key sequences to perform the suggestion, if known\n"
+             "  }\n"
+             "Guidelines:\n"
+             "- Interpret Git porcelain codes correctly (see legend below). If the INDEX column is non-blank, the change is staged;\n"
+             "  do NOT suggest staging it again. Prefer commit/review actions instead.\n"
+             "- When suggesting to commit with an AI-generated message, prefer keys [c i] if present in the keys help; otherwise [c c].\n"
+             "Answer STRICTLY in %s for all textual fields. No Markdown or extra prose outside JSON.\n"
+             "%s"
+             "\n--- BEGIN STATUS ---\n%s\n--- END STATUS ---\n"
+             "\n--- GIT PORCELAIN LEGEND ---\n"
+             "XY columns (X=index/staged, Y=worktree):\n"
+             "  M  file   → staged modify (index changed)\n"
+             "   M file   → unstaged modify (worktree changed)\n"
+             "  A  file   → staged add\n"
+             "  D  file   → staged delete\n"
+             "   D file   → unstaged delete\n"
+             "  R  old -> new → staged rename\n"
+             "  C  old -> new → staged copy\n"
+             "  U? or ?U or UU → unmerged/conflict\n"
+             "  ?? file   → untracked\n"
+             "--- END GIT PORCELAIN LEGEND ---\n"
+             "%s")
+            ilang
+            (if have-keys
+                (concat
+                 "\nUse ONLY the following Magit key sequences when populating suggestions[].keys.\n"
+                 "If no matching action exists in this cheatsheet, use an empty array [] (do NOT guess).\n"
+                 "--- BEGIN MAGIT KEYS HELP ---\n" keys "\n--- END MAGIT KEYS HELP ---\n")
+              "\nIf you know relevant Magit key sequences, include them in suggestions[].keys; otherwise use [].\n")
+            status
+            "")))
 
 (defun magpt--render-explain-status (json _data)
   (magpt--history-append-entry 'explain-status (or magpt--current-request "") (or json "")
-                               "JSON schema: {summary, risks[], suggestions[].commands[]}"))
+                               "JSON schema: {summary, risks[], suggestions[].commands[], suggestions[].keys[]}"))
 
 ;; Commit Lint/Fix Suggest
 
@@ -1949,8 +2100,8 @@ Return (data preview bytes)."
         (let* ((root (magpt--project-root))
                (diff (magpt--staged-diff root))
                (preview (format "MSG:\n%s\n\n--- DIFF (truncated for preview) ---\n%s"
-                                msg
-                                (if (> (length diff) 2000) (concat (substring diff 0 2000) " …") diff)))
+                              msg
+                              (if (> (length diff) 2000) (concat (substring diff 0 2000) " …") diff)))
                (bytes (+ (magpt--string-bytes msg) (magpt--string-bytes diff))))
           (list (list :message msg :diff diff) preview bytes))))))
 
@@ -1962,27 +2113,27 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
          (lang-lines
           (concat
            (when (and (stringp magpt-commit-language)
-                      (> (length magpt-commit-language) 0))
+                   (> (length magpt-commit-language) 0))
              (format "Write suggestion.message STRICTLY in %s.\n" magpt-commit-language))
            (when (and (stringp magpt-info-language)
-                      (> (length magpt-info-language) 0))
+                   (> (length magpt-info-language) 0))
              (format "Use %s for any explanatory text (e.g., issues[] strings). Answer strictly in this language for non-JSON fields.\n" magpt-info-language)))))
     (format (concat
-             "You lint Git commit messages against Conventional Commits.\n"
-             "Given the current commit message and staged diff, identify issues and suggest a fix.\n"
-             "Rules:\n"
-             "- Keep title <= 72 chars, imperative mood.\n"
-             "- Suggest minimal changes; don't invent ticket IDs.\n"
-             "Return ONLY JSON with fields:\n"
-             "  status: \"ok\" | \"issues\",\n"
-             "  issues: array of strings,\n"
-             "  suggestion: { replace: boolean, message: string }\n\n"
-             "%s"
-             "--- BEGIN MESSAGE ---\n%s\n--- END MESSAGE ---\n\n"
-             "--- BEGIN DIFF ---\n%s\n--- END DIFF ---\n")
-            lang-lines
-            msg
-            diff)))
+           "You lint Git commit messages against Conventional Commits.\n"
+           "Given the current commit message and staged diff, identify issues and suggest a fix.\n"
+           "Rules:\n"
+           "- Keep title <= 72 chars, imperative mood.\n"
+           "- Suggest minimal changes; don't invent ticket IDs.\n"
+           "Return ONLY JSON with fields:\n"
+           "  status: \"ok\" | \"issues\",\n"
+           "  issues: array of strings,\n"
+           "  suggestion: { replace: boolean, message: string }\n\n"
+           "%s"
+           "--- BEGIN MESSAGE ---\n%s\n--- END MESSAGE ---\n\n"
+           "--- BEGIN DIFF ---\n%s\n--- END DIFF ---\n")
+          lang-lines
+          msg
+          diff)))
 
 (defun magpt--render-commit-lint (json data)
   (ignore data)
@@ -1996,8 +2147,8 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (let* ((root (magpt--project-root))
          (porc (magpt--git root "status" "--porcelain"))
          (paths (mapcar (lambda (l) (string-trim (substring l 3)))
-                        (seq-filter (lambda (l) (>= (length l) 3))
-                                    (split-string porc "\n" t))))
+                       (seq-filter (lambda (l) (>= (length l) 3))
+                                   (split-string porc "\n" t))))
          (preview (string-join (seq-take paths 50) "\n"))
          (bytes (magpt--string-bytes preview)))
     (list (list :paths paths) preview bytes)))
@@ -2007,18 +2158,18 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (let ((paths (plist-get data :paths))
         (ilang (or magpt-info-language "English")))
     (format (concat
-             "Propose a safe Git branch name in kebab-case for the current work.\n"
-             "Constraints:\n"
-             "- lowercase, kebab-case, <= 40 chars, [a-z0-9-] only, no trailing dash.\n"
-             "- Prefer intent over specifics; no secrets.\n"
-             "Use %s for textual fields like rationale. Answer strictly in this language.\n"
-             "Return ONLY JSON with fields:\n"
-             "  name: string,\n"
-             "  alternatives: array of strings,\n"
-             "  rationale: string\n\n"
-             "--- BEGIN PATHS ---\n%s\n--- END PATHS ---\n")
-            ilang
-            (string-join paths "\n"))))
+           "Propose a safe Git branch name in kebab-case for the current work.\n"
+           "Constraints:\n"
+           "- lowercase, kebab-case, <= 40 chars, [a-z0-9-] only, no trailing dash.\n"
+           "- Prefer intent over specifics; no secrets.\n"
+           "Use %s for textual fields like rationale. Answer strictly in this language.\n"
+           "Return ONLY JSON with fields:\n"
+           "  name: string,\n"
+           "  alternatives: array of strings,\n"
+           "  rationale: string\n\n"
+           "--- BEGIN PATHS ---\n%s\n--- END PATHS ---\n")
+          ilang
+          (string-join paths "\n"))))
 
 (defun magpt--render-branch-name (json _data)
   (magpt--history-append-entry 'branch-name-suggest (or magpt--current-request "") (or json "")
@@ -2093,7 +2244,8 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 ;; No background LLM calls; explicit "g" runs the task.
 
 (defvar magpt--ai-actions-suggestions nil
-  "List of suggestion plists from the last explain-status: (:title STRING :commands STRING).")
+  "List of suggestion plists from the last explain-status:
+(:title STRING :commands STRING :keys LIST-OF-STRINGS).")
 
 (defvar magpt--ai-actions-summary nil
   "Summary string from the last explain-status, if available.")
@@ -2106,24 +2258,28 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
       (let ((sugs (or (alist-get 'suggestions data) '()))
             (summary (alist-get 'summary data)))
         (setq magpt--ai-actions-summary (and (stringp summary) summary))
-        (mapcar (lambda (s)
-                  (let* ((title (or (alist-get 'title s) ""))
-                         (cmds  (mapconcat (lambda (c) (format "%s" c))
-                                           (or (alist-get 'commands s) '()) "\n")))
-                    (list :title title :commands cmds)))
-                sugs)))))
+        (mapcar
+         (lambda (s)
+           (let* ((title (or (alist-get 'title s) ""))
+                  (cmds  (mapconcat (lambda (c) (format "%s" c))
+                                  (or (alist-get 'commands s) '()) "\n"))
+                  (keys  (let ((ks (or (alist-get 'keys s)
+                                       (alist-get 'magit_keys s))))
+                           (and (listp ks) (seq-filter #'stringp ks)))))
+             (list :title title :commands cmds :keys keys)))
+         sugs)))))
 
 (defun magpt--ai-actions-init ()
   "Initialize AI actions state from history."
   (setq magpt--ai-actions-suggestions
-        (or (magpt--ai-suggestions-from-last-explain-status) '()))
+       (or (magpt--ai-suggestions-from-last-explain-status) '()))
   (length magpt--ai-actions-suggestions))
 
 (defun magpt--ai-actions-choose-index ()
   "Prompt for a suggestion index using completing-read."
   (unless magpt--ai-actions-suggestions (magpt--ai-actions-init))
   (let* ((titles (mapcar (lambda (it) (plist-get it :title))
-                         magpt--ai-actions-suggestions))
+                        magpt--ai-actions-suggestions))
          (choice (completing-read "Suggestion: " titles nil t)))
     (cl-position choice titles :test #'string=)))
 
@@ -2136,8 +2292,13 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
     (let* ((i (or idx (magpt--ai-actions-choose-index)))
            (sug (nth i magpt--ai-actions-suggestions))
            (title (plist-get sug :title))
-           (cmds (plist-get sug :commands)))
-      (magpt--btn-preview-text (format "AI suggestion: %s" title) cmds 'shell))))
+           (cmds (plist-get sug :commands))
+           (keys (plist-get sug :keys))
+           (keys-str (and (listp keys) (string-join (mapcar (lambda (k) (format "%s" k)) keys) ", ")))
+           (body (if keys-str
+                     (format "# Magit keys: %s\n\n%s" keys-str cmds)
+                   cmds)))
+      (magpt--btn-preview-text (format "AI suggestion: %s" title) body 'shell))))
 
 (defun magpt-ai-actions-copy (&optional idx)
   "Copy commands for a suggestion to the kill-ring."
@@ -2157,7 +2318,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (unless magpt--ai-actions-summary
     (magpt--ai-actions-init))
   (if (not (and (stringp magpt--ai-actions-summary)
-                (> (length magpt--ai-actions-summary) 0)))
+              (> (length magpt--ai-actions-summary) 0)))
       (user-error "No summary available; run magpt-explain-status first")
     (kill-new magpt--ai-actions-summary)
     (message "magpt: summary copied")))
@@ -2224,9 +2385,9 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 (defun magpt-magit-insert-ai-overview ()
   "Insert a compact 'AI overview (magpt)' section into magit-status."
   (when (and magpt-magit-overview-enabled
-             (featurep 'magit)
-             (fboundp 'magit-insert-section)
-             (fboundp 'magit-insert-heading))
+          (featurep 'magit)
+          (fboundp 'magit-insert-section)
+          (fboundp 'magit-insert-heading))
     (magit-insert-section (magit-section 'magpt-ai-overview)
       ;; Parent heading: only this line is highlighted by Magit.
       (magit-insert-heading "AI overview (magpt)")
@@ -2279,8 +2440,13 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                   (magit-insert-section (magit-section 'magpt-ai-explain-suggestions)
                     (magit-insert-heading (magpt--i18n 'overview-suggestions))
                     (dolist (s ss)
-                      (let ((title (or (alist-get 'title s) (format "Suggestion %d" i))))
-                        (insert (format "  %d) %s\n" i title)))
+                      (let* ((title (or (alist-get 'title s) (format "Suggestion %d" i)))
+                             (keys  (or (alist-get 'keys s) (alist-get 'magit_keys s)))
+                             (keys-str (and (listp keys)
+                                          (string-join (mapcar (lambda (k) (format "%s" k)) keys) ", "))))
+                        (insert (format "  %d) %s%s\n"
+                                      i title
+                                      (if keys-str (format " [%s]" keys-str) ""))))
                       (setq i (1+ i)))
                     (when (and compact (> (length sugs) (length ss)))
                       (insert (format "  … %d more (open JSON)\n" (- (length sugs) (length ss)))))))

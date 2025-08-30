@@ -2,7 +2,7 @@
 
 ;; Author: Peter <11111000000@email.com>
 ;; URL: https://github.com/11111000000/magpt
-;; Version: 1.6.0
+;; Version: 1.6.1
 ;; Package-Requires: ((emacs "28.1") (gptel "0.9"))
 ;; Keywords: tools, vc, git, ai
 

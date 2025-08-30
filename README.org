@@ -149,7 +149,7 @@ Settings (variable, default, description):
 | magpt-overview-compact-max-suggestions | 3                         | Max suggestions shown in compact density for Explain Status.                                                   |
 | magpt-magit-overview-enabled           | t                         | Insert compact “AI overview (magpt)” section into Magit Status.                                                |
 
-Notes on localization: MaGPT uses the info and commit language preferences to nudge the model via prompts. Some user messages (UI echoes) are localized to English and Russian.
+Notes on localization: MaGPT uses the info and commit language preferences to nudge the model via prompts. Some user messages (UI echoes) are localized to English, Russian, and French.
 
 ** Magit integration
 When magpt-mode is active, MaGPT integrates without changing Magit defaults. The Magit commit transient gets an extra entry to request an AI message for the current staged diff. The Magit Status buffer shows a compact “AI overview (magpt)” section summarizing the latest Explain Status, with per‑task cards for recent results. A dedicated “.” key in Magit Status opens AI actions for quick previews and copies.

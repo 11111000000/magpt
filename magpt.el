@@ -2,7 +2,7 @@
 
 ;; Author: Peter <11111000000@email.com>
 ;; URL: https://github.com/11111000000/magpt
-;; Version: 1.5.0
+;; Version: 1.6.0
 ;; Package-Requires: ((emacs "28.1") (gptel "0.9"))
 ;; Keywords: tools, vc, git, ai
 
@@ -377,8 +377,6 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
 ;;;; Section: GPT integration wrappers
 ;;
 ;; We centralize gptel-request usage for logging and callback safety. Streaming is opt-in.
-
-
 
 (defun magpt--response->string (resp)
   "Return RESP as a string, tolerating backend variations."
@@ -2176,32 +2174,32 @@ Be sure to consider all messages, errors, hints and warnings present in the 'REC
          (keys-block
           (if have-keys
               (concat
-               "\nИспользуйте ТОЛЬКО перечисленные ниже Magit сочетания клавиш для suggestions[].keys.\n"
-               "Если нет подходящего действия — укажите [].\n"
+               "\nUse ONLY the Magit key bindings listed below for suggestions[].keys.\n"
+               "If no suitable action exists, use [].\n"
                "--- BEGIN MAGIT KEYS HELP ---\n" keys "\n--- END MAGIT KEYS HELP ---\n")
-            "\nЕсли известны сочетания Magit, включите их в suggestions[].keys, иначе используйте [].\n"))
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n"))
          (recent-block
           (if (and (stringp recent-output) (> (length recent-output) 0))
               (format "\n--- RECENT GIT OUTPUT ---\n%s\n--- END RECENT GIT OUTPUT ---\n" recent-output)
             "")))
     (format (concat
-             "Вы — опытный разработчик. Проанализируйте текущий статус репозитория и полный вывод последних команд Git.\n"
-             "Обязательно учтите все сообщения, ошибки и подсказки, присутствующие в разделе RECENT GIT OUTPUT ниже.\n"
-             "Если там выданы варианты действий, конфликты или важно дождаться действий пользователя — дайте рекомендации именно исходя из них.\n"
-             "Ответьте СТРОГО на русском языке. Отвечайте только JSON вида:\n"
+             "You are an experienced developer. Analyze the current repository status and the full output of recent Git commands.\n"
+             "Make sure to account for all messages, errors, hints, and warnings present in the RECENT GIT OUTPUT section below.\n"
+             "If it suggests actions, shows conflicts, or requires the user to finish an interactive step — tailor your recommendations to that specifically.\n"
+             "Answer STRICTLY in %s. Return ONLY JSON with fields:\n"
              "  summary: string,\n"
              "  risks:   array of strings,\n"
              "  suggestions: array of {\n"
              "    title: string,\n"
              "    commands: array of strings,\n"
-             "    keys: array of strings  // Magit key sequences для рекомендации; если не известно — []\n"
+             "    keys: array of strings  // Magit key sequences to recommend; if unknown — []\n"
              "  }\n"
-             "Инструкция:\n"
-             "- Интерпретируйте коды Git status (см. legend), но если есть свежий вывод команды с ошибками/hint/ожиданиями — ОТДАВАЙТЕ ПРИОРИТЕТ анализу этого вывода."
-             " Предлагайте решения и предупреждения именно по факту ошибок или сообщений в выводе.\n"
-             "- Например: если git просит закрыть редактор, конфликт pull, требуется выбор стратегии rebase/merge и т.п.\n"
-             "- Никогда не предлагайте stage/unstage для уже staged изменений\n"
-             "- Для коммита с AI-сообщением предпочтительно используйте ключ [c i], если есть; иначе [c c].\n"
+             "Instructions:\n"
+             "- Interpret Git status codes (see legend), but if there is recent command output with errors/hints/pending steps — PRIORITIZE analyzing that output."
+             " Provide solutions and warnings based on the actual messages.\n"
+             "- For example: editor needs to be closed, pull conflicts, choosing rebase/merge strategy, etc.\n"
+             "- Never suggest stage/unstage for changes already staged\n"
+             "- For a commit with an AI-generated message prefer [c i] if available; otherwise [c c].\n"
              "%s"
              "\n--- BEGIN STATUS ---\n%s\n--- END STATUS ---\n"
              "%s"
@@ -2214,10 +2212,10 @@ Be sure to consider all messages, errors, hints and warnings present in the 'REC
              "   D file   → unstaged delete\n"
              "  R  old -> new → staged rename\n"
              "  C  old -> new → staged copy\n"
-             "  U? or ?U or UU → конфликт слияния\n"
-             "  ?? file   → неотслеживаемый файл\n"
+             "  U? or ?U or UU → merge conflict\n"
+             "  ?? file   → untracked file\n"
              "--- END GIT PORCELAIN LEGEND ---\n")
-            keys-block status recent-block)))
+            ilang keys-block status recent-block)))
 
 (defun magpt--render-explain-status (json _data)
   (magpt--history-append-entry 'explain-status (or magpt--current-request "") (or json "")

@@ -329,6 +329,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (overview-alternatives . "Alternatives:")
     (overview-rationale . "Rationale:")
     (overview-no-data . "(no data - press [. g] to refresh)")
+    (overview-stale . "(status changed - press [. g] to refresh)")
     (patch-opened . "Opened response in patch buffer")))
 
 (defconst magpt--i18n-ru
@@ -361,6 +362,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     (overview-alternatives . "Альтернативы:")
     (overview-rationale . "Обоснование:")
     (overview-no-data . "(нет данных - нажмите [. g] для обновления)")
+    (overview-stale . "(статус изменился - нажмите [. g] для обновления)")
     (patch-opened . "Патч открыт в буфере")))
 
 (defun magpt--i18n (key &rest args)
@@ -2210,6 +2212,14 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 
 ;;;###;; Mini renderer for Explain Status inside Magit: use child sections so only headings highlight.
 
+(defun magpt--request-extract-status (request)
+  "Extract the STATUS block from REQUEST (between --- BEGIN STATUS --- and --- END STATUS ---)."
+  (when (stringp request)
+    (let* ((beg (regexp-quote "--- BEGIN STATUS ---"))
+           (end (regexp-quote "--- END STATUS ---"))
+           (re (concat beg "\\(?:\n\\)?\\(\\(?:.\\|\n\\)*?\\)\\(?:\n\\)?" end)))
+      (when (string-match re request)
+        (string-trim-right (match-string 1 request))))))
 
 (defun magpt-magit-insert-ai-overview ()
   "Insert a compact 'AI overview (magpt)' section into magit-status."
@@ -2226,49 +2236,61 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
              (rc (magpt--history-last-entry-for 'resolve-conflict-here)))
         (if (not ex)
             (insert (format "  %s\n" (magpt--i18n 'overview-no-data)))
-          ;; Inline Explain Status: Сводка/Риски/Рекомендации как дочерние секции AI overview
-          (let* ((data (magpt--entry-parse-json-safe ex))
-                 (summary (and data (alist-get 'summary data)))
-                 (risks (and data (alist-get 'risks data)))
-                 (sugs  (and data (alist-get 'suggestions data)))
-                 (compact (eq magpt-ui-density 'compact))
-                 (max-r (and compact magpt-overview-compact-max-risks))
-                 (max-s (and compact magpt-overview-compact-max-suggestions)))
-            ;; Summary subsection
-            (when (stringp summary)
-              (magit-insert-section (magit-section 'magpt-ai-explain-summary)
-                (magit-insert-heading (magpt--i18n 'overview-summary))
-                (dolist (ln (split-string (string-trim-right summary) "\n"))
-                  (insert "  " ln "\n"))))
-            ;; Risks subsection
-            (when (listp risks)
-              (let ((rs (if max-r (seq-take risks max-r) risks)))
-                (magit-insert-section (magit-section 'magpt-ai-explain-risks)
-                  (magit-insert-heading (magpt--i18n 'overview-risks))
-                  (if rs
-                      (dolist (r rs) (insert "  • " (format "%s" r) "\n"))
-                    (insert "  • none\n"))
-                  (when (and compact (> (length risks) (length rs)))
-                    (insert (format "  … %d more\n" (- (length risks) (length rs))))))))
-            ;; Suggestions subsection
-            (when (listp sugs)
-              (let ((ss (if max-s (seq-take sugs max-s) sugs))
-                    (i 1))
-                (magit-insert-section (magit-section 'magpt-ai-explain-suggestions)
-                  (magit-insert-heading (magpt--i18n 'overview-suggestions))
-                  (dolist (s ss)
-                    (let ((title (or (alist-get 'title s) (format "Suggestion %d" i))))
-                      (insert (format "  %d) %s\n" i title)))
-                    (setq i (1+ i)))
-                  (when (and compact (> (length sugs) (length ss)))
-                    (insert (format "  … %d more (open JSON)\n" (- (length sugs) (length ss)))))))
-              ;; Кнопки только один раз для всего explain-status
-              (magpt--insert-entry-buttons ex))
-            ;; Если невалидный или пустой — фоллбек
-            (unless (and (plist-get ex :valid) (magpt--entry-parse-json-safe ex))
-              (insert (magpt--i18n 'overview-response) "\n")
-              (insert (string-trim-right (plist-get ex :response)) "\n\n")
-              (magpt--insert-entry-buttons ex))))
+          (progn
+            (let* ((stale
+                    (condition-case _
+                        (let* ((req (plist-get ex :request))
+                               (old (and (stringp req) (magpt--request-extract-status req)))
+                               (root (magpt--project-root))
+                               (porc (magpt--git root "status" "--porcelain"))
+                               (cur (string-join (seq-take (split-string porc "\n" t) 200) "\n")))
+                          (and old (not (string= (string-trim old) (string-trim cur)))))
+                      (error nil))))
+              (when stale
+                (insert (format "  %s\n" (magpt--i18n 'overview-stale)))))
+            ;; Inline Explain Status: Сводка/Риски/Рекомендации как дочерние секции AI overview
+            (let* ((data (magpt--entry-parse-json-safe ex))
+                   (summary (and data (alist-get 'summary data)))
+                   (risks (and data (alist-get 'risks data)))
+                   (sugs  (and data (alist-get 'suggestions data)))
+                   (compact (eq magpt-ui-density 'compact))
+                   (max-r (and compact magpt-overview-compact-max-risks))
+                   (max-s (and compact magpt-overview-compact-max-suggestions)))
+              ;; Summary subsection
+              (when (stringp summary)
+                (magit-insert-section (magit-section 'magpt-ai-explain-summary)
+                  (magit-insert-heading (magpt--i18n 'overview-summary))
+                  (dolist (ln (split-string (string-trim-right summary) "\n"))
+                    (insert "  " ln "\n"))))
+              ;; Risks subsection
+              (when (listp risks)
+                (let ((rs (if max-r (seq-take risks max-r) risks)))
+                  (magit-insert-section (magit-section 'magpt-ai-explain-risks)
+                    (magit-insert-heading (magpt--i18n 'overview-risks))
+                    (if rs
+                        (dolist (r rs) (insert "  • " (format "%s" r) "\n"))
+                      (insert "  • none\n"))
+                    (when (and compact (> (length risks) (length rs)))
+                      (insert (format "  … %d more\n" (- (length risks) (length rs))))))))
+              ;; Suggestions subsection
+              (when (listp sugs)
+                (let ((ss (if max-s (seq-take sugs max-s) sugs))
+                      (i 1))
+                  (magit-insert-section (magit-section 'magpt-ai-explain-suggestions)
+                    (magit-insert-heading (magpt--i18n 'overview-suggestions))
+                    (dolist (s ss)
+                      (let ((title (or (alist-get 'title s) (format "Suggestion %d" i))))
+                        (insert (format "  %d) %s\n" i title)))
+                      (setq i (1+ i)))
+                    (when (and compact (> (length sugs) (length ss)))
+                      (insert (format "  … %d more (open JSON)\n" (- (length sugs) (length ss)))))))
+                ;; Кнопки только один раз для всего explain-status
+                (magpt--insert-entry-buttons ex))
+              ;; Если невалидный или пустой — фоллбек
+              (unless (and (plist-get ex :valid) (magpt--entry-parse-json-safe ex))
+                (insert (magpt--i18n 'overview-response) "\n")
+                (insert (string-trim-right (plist-get ex :response)) "\n\n")
+                (magpt--insert-entry-buttons ex)))))
         ;; Child section: Commit Lint / Fix Suggest
         (when cl
           (magit-insert-section (magit-section 'magpt-ai-card-commit-lint)

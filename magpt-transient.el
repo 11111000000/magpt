@@ -74,7 +74,7 @@
         (when (boundp 'magit-status-mode-map)
           (define-key magit-status-mode-map (kbd ".") #'magpt-ai-actions-entry))
         ;; Magit Status: AI overview section (read-only; no background calls)
-        ;; Append to run after built-in sections (e.g., after Recent commits).
+        ;; Add after built-in sections: append so the AI overview appears at the bottom.
         (add-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview t))
     (with-eval-after-load 'magit
       (magpt--transient-remove-suffix-safe 'magit-commit "i")

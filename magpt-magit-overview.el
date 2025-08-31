@@ -15,13 +15,14 @@
 (require 'seq)
 (require 'json)
 (require 'magit nil t)
+(require 'magpt-apply nil t)
 
 (defcustom magpt-magit-overview-enabled t
   "If non-nil, insert a compact 'AI overview (magpt)' section into magit-status."
   :type 'boolean
   :group 'magpt)
 
-(defcustom magpt-magit-auto-refresh nil
+(defcustom magpt-magit-auto-refresh t
   "If non-nil, automatically refresh visible Magit status buffers when AI history changes.
 When non-nil, magpt will programmatically call `magit-refresh' after tasks complete,
 which may affect section visibility in some Magit versions. Set this to nil to avoid
@@ -232,16 +233,19 @@ Respect `magpt-magit-auto-refresh' — when nil do nothing."
                               (insert "\n")))
                           (setq i (1+ i)))))
                     (when (and compact (> (length sugs) (length ss)))
-                      (insert (format "  … %d more (open JSON)\n" (- (length sugs) (length ss)))))))
-                ;; Buttons only once for the entire explain-status
-                (when (fboundp 'magpt--insert-entry-buttons)
-                  (magpt--insert-entry-buttons ex)))
+                      (insert (format "  … %d more (open JSON)\n" (- (length sugs) (length ss)))))
+                    ;; Make sure the action buttons for the entire explain-status
+                    ;; entry are *also* inside a magit section node.
+                    (when (fboundp 'magpt--insert-entry-buttons)
+                      (magit-insert-section (magit-section 'magpt-explain-status-buttons)
+                        (magpt--insert-entry-buttons ex))))))
               ;; Fallback only if parsing failed
               (unless (magpt--entry-parse-json-safe ex)
-                (insert (magpt--i18n 'overview-response) "\n")
-                (insert (string-trim-right (plist-get ex :response)) "\n\n")
-                (when (fboundp 'magpt--insert-entry-buttons)
-                  (magpt--insert-entry-buttons ex)))))
+                (magit-insert-section (magit-section 'magpt-explain-status-fallback)
+                  (insert (magpt--i18n 'overview-response) "\n")
+                  (insert (string-trim-right (plist-get ex :response)) "\n\n")
+                  (when (fboundp 'magpt--insert-entry-buttons)
+                    (magpt--insert-entry-buttons ex))))))
           ;; Child section: Commit Lint / Fix Suggest
           (when cl
             (magit-insert-section (magit-section 'magpt-ai-card-commit-lint)
@@ -310,8 +314,8 @@ Respect `magpt-magit-auto-refresh' — when nil do nothing."
                       (magpt--insert-entry-buttons rc)))))
               ;; Hint line with key shortcut.
               (insert (propertize "  [.] AI actions\n" 'face 'magpt-badge-info-face))
-              (insert "\n"))))
+              (insert "\n"))))))))
 
-        (provide 'magpt-magit-overview)
+(provide 'magpt-magit-overview)
 
 ;;; magpt-magit-overview.el ends here

@@ -4,7 +4,7 @@
 
 '(
   ;; Язык информационных сообщений (обзоры, пояснения, рационали)
-  (magpt-info-language . "English")
+  (magpt-info-language . "Russian")
 
   ;; Язык для генерируемых сообщений коммитов
   (magpt-commit-language . "English")

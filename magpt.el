@@ -351,7 +351,7 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
     ;; Обзор/История (ключи, используемые в AI Overview)
     (overview-response . "Ответ:")
     (json-opened . "Ответ открыт в JSON буфере")
-    (json-cопied . "Ответ скопирован в kill-ring")
+    (json-copied . "Ответ скопирован в kill-ring")
     ;; Заголовки секций (локализованный UI)
     (overview-summary . "Сводка:")
     (overview-risks . "Риски:")
@@ -1048,8 +1048,8 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
   (if magpt-mode
       (with-eval-after-load 'magit
         ;; Commit transient: add AI commit entry
-        (transient-append-suffix 'magit-commit "c"
-          `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged))
+        (magpt--transient-append-suffix-safe 'magit-commit "c"
+                                             `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged))
         ;; Magit dispatch: robust insertion (no hard dependency on a specific anchor).
         (magpt--transient-add-to-magit-dispatch)
         ;; Direct key in Magit Status buffer: "." opens AI actions immediately (without dispatch).
@@ -1120,26 +1120,29 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                             (let ((n (min 180 (length prompt)))) (substring prompt 0 n)))
                 (message "magpt: requesting %s..." (magpt-task-name task))
                 (condition-case gerr
-                    (magpt--gptel-request
-                     prompt
-                     :system (magpt--system-prompt 'info)
-                     :callback
-                     (lambda (resp info)
-                       (ignore info)
-                       (let ((magpt--current-request prompt))
-                         (condition-case cerr
-                             (let ((out (string-trim (magpt--response->string resp))))
-                               (magpt--log "task-callback: %s resp-type=%S out-preview=%s"
-                                           (magpt-task-name task) (type-of resp)
-                                           (substring out 0 (min 180 (length out))))
-                               (funcall (magpt-task-render-fn task) out data)
-                               (when (magpt-task-apply-fn task)
-                                 (funcall (magpt-task-apply-fn task) out data)))
-                           (error
-                            (magpt--log "task-callback exception: %s" (error-message-string cerr))
-                            (magpt--log "task-callback exception: signal=%S data=%S" (car-safe cerr) (cdr-safe cerr))
-                            (magpt--log "task-callback exception: BT:\n%s" (magpt--backtrace-string))
-                            (message "%s" (magpt--i18n 'callback-error (error-message-string cerr))))))))
+                    (let ((sys (pcase (magpt-task-name task)
+                                 ((or 'stage-by-intent-hunks 'resolve-conflict-here) nil)
+                                 (_ (magpt--system-prompt 'info)))))
+                      (magpt--gptel-request
+                       prompt
+                       :system sys
+                       :callback
+                       (lambda (resp info)
+                         (ignore info)
+                         (let ((magpt--current-request prompt))
+                           (condition-case cerr
+                               (let ((out (string-trim (magpt--response->string resp))))
+                                 (magpt--log "task-callback: %s resp-type=%S out-preview=%s"
+                                             (magpt-task-name task) (type-of resp)
+                                             (substring out 0 (min 180 (length out))))
+                                 (funcall (magpt-task-render-fn task) out data)
+                                 (when (magpt-task-apply-fn task)
+                                   (funcall (magpt-task-apply-fn task) out data)))
+                             (error
+                              (magpt--log "task-callback exception: %s" (error-message-string cerr))
+                              (magpt--log "task-callback exception: signal=%S data=%S" (car-safe cerr) (cdr-safe cerr))
+                              (magpt--log "task-callback exception: BT:\n%s" (magpt--backtrace-string))
+                              (message "%s" (magpt--i18n 'callback-error (error-message-string cerr)))))))))
                   (error
                    (magpt--log "gptel-request error for %s: %s\nBT:\n%s"
                                (magpt-task-name task)
@@ -1192,6 +1195,13 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
 
 (defvar magpt--current-request nil
   "Dynamically bound prompt/request preview for history appends and AI overview rendering.")
+
+(defcustom magpt-history-max-entries 200
+  "Maximum number of entries to keep in history for AI Overview and actions.
+If nil or non-positive, history is unbounded."
+  :type '(choice (const :tag "Unlimited" nil)
+                 (integer :tag "Max entries"))
+  :group 'magpt)
 
 (defcustom magpt-ui-density 'regular
   "UI density profile (affects AI overview): 'regular or 'compact.
@@ -1353,7 +1363,7 @@ When called interactively without ENTRY, try entry at point or the latest."
             (error nil))
           (setq buffer-read-only t)))
       (pop-to-buffer buf)
-      (message "%s" (magpt--i18n 'patch-opened)))))
+      (message "%s" (magpt--i18n 'json-opened)))))
 
 (defun magpt--btn--call (fn entry)
   "Helper to call FN with ENTRY, catching errors."
@@ -1425,7 +1435,7 @@ When called interactively without ENTRY, try entry at point or the latest."
         (when (fboundp 'diff-mode) (ignore-errors (diff-mode)))
         (setq buffer-read-only t)))
     (pop-to-buffer buf)
-    (message "%s" (magpt--i18n 'json-opened))))
+    (message "%s" (magpt--i18n 'patch-opened))))
 
 (defun magpt-check-response-patch (&optional entry &rest args)
   "Run 'git apply --check' for ENTRY's response patch in index or worktree (per ARGS)."
@@ -1611,6 +1621,12 @@ Extra KV pairs can be provided in KVS to extend the stored plist."
     ;; Extend entry with any extra kvs (e.g., :status-snapshot).
     (when kvs (setq entry (append entry kvs)))
     (push entry magpt--history-entries)
+    ;; Trim history to `magpt-history-max-entries' if configured.
+    (when (and (integerp magpt-history-max-entries)
+               (> magpt-history-max-entries 0)
+               (> (length magpt--history-entries) magpt-history-max-entries))
+      (setcdr (nthcdr (1- magpt-history-max-entries) magpt--history-entries) nil)
+      (magpt--log "history: trimmed to %d entries" magpt-history-max-entries))
     (magpt--log "history: task=%s json?=%s valid=%s resp-preview=%s"
                 task looks-like-json json-valid
                 (substring resp 0 (min 180 (length resp))))

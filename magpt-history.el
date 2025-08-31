@@ -1,0 +1,80 @@
+;;; magpt-history.el --- History storage for MaGPT  -*- lexical-binding: t; -*-
+;;
+;; Maintains history of AI requests/responses (shared for overview, actions, etc).
+;;
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'seq)
+(require 'json)
+
+(defvar magpt--history-entries nil
+  "List of history entries (plists):
+  :time STRING :task SYMBOL :request STRING :response STRING
+  :valid t/nil :note STRING (optional).")
+
+(defvar magpt--current-request nil
+  "Dynamically bound prompt/request preview for history appends and AI overview rendering.")
+
+(defcustom magpt-history-max-entries 200
+  "Maximum number of entries to keep in history for AI Overview and actions.
+If nil or non-positive, history is unbounded."
+  :type '(choice (const :tag "Unlimited" nil)
+                 (integer :tag "Max entries"))
+  :group 'magpt)
+
+(defun magpt--entry-parse-json-safe (entry)
+  "Parse ENTRY's :response as JSON; return alist or nil."
+  (let ((resp (plist-get entry :response)))
+    (condition-case _err
+        (json-parse-string (or resp "") :object-type 'alist :array-type 'list)
+      (error nil))))
+
+;; Forward declaration for sanitizer
+(declare-function magpt--sanitize-response "magpt-gpt" (s))
+
+(defun magpt--history-append-entry (task request response &optional note &rest kvs)
+  "Append an entry to history for TASK and run update hooks.
+Extra KV pairs can be provided in KVS to extend the stored plist."
+  (let* ((resp-raw (if (stringp response) response (prin1-to-string response)))
+         (resp
+          (if (fboundp 'magpt--sanitize-response)
+              (magpt--sanitize-response (string-trim (or resp-raw "")))
+            (string-trim (or resp-raw ""))))
+         (looks-like-json (string-match-p "\\`[ \t\n]*[{\\[]" resp))
+         (json-valid
+          (and looks-like-json
+               (condition-case _err
+                   (progn (json-parse-string resp :object-type 'alist) t)
+                 (error nil))))
+         (entry (list :time (format-time-string "%Y-%m-%d %H:%M:%S")
+                      :task task
+                      :request (or request "")
+                      :response resp
+                      :valid json-valid
+                      :note note)))
+    ;; Extend entry with any extra kvs (e.g., :status-snapshot).
+    (when kvs (setq entry (append entry kvs)))
+    (push entry magpt--history-entries)
+    ;; Trim history if needed.
+    (when (and (integerp magpt-history-max-entries)
+               (> magpt-history-max-entries 0)
+               (> (length magpt--history-entries) magpt-history-max-entries))
+      (setcdr (nthcdr (1- magpt-history-max-entries) magpt--history-entries) nil))
+    ;; Fire notification hook if defined in parent.
+    (when (boundp 'magpt-history-changed-hook)
+      (run-hooks 'magpt-history-changed-hook))))
+
+(defun magpt--history-tasks ()
+  "Return a list of unique task symbols present in history."
+  (delete-dups (mapcar (lambda (e) (plist-get e :task)) magpt--history-entries)))
+
+(defun magpt--history-last-entry-for (task)
+  "Return the most recent history entry plist for TASK, or nil if none."
+  (seq-find (lambda (e) (eq (plist-get e :task) task))
+            magpt--history-entries))
+
+(provide 'magpt-history)
+
+;;; magpt-history.el ends here

@@ -98,15 +98,22 @@ a short backtrace snippet to help find what triggers automatic expansion of sect
 
 (defun magpt--refresh-magit-status-visible ()
   "Refresh visible Magit status buffers (if any) to update AI overview.
-Respect `magpt-magit-auto-refresh' — when nil do nothing."
+Respect `magpt-magit-auto-refresh' — when nil do nothing.
+
+Schedule the actual refresh with `run-at-time' to avoid performing refreshes
+during redisplay callbacks (which can cause redisplay errors in some setups).
+This also ensures the Magit status buffer is updated asynchronously after
+history changes (no need for the user to press \"g\")."
   (when (and magpt-magit-auto-refresh (featurep 'magit))
-    (dolist (win (window-list))
-      (with-current-buffer (window-buffer win)
-        (when (derived-mode-p 'magit-status-mode)
-          (ignore-errors
-            (cond
-             ((fboundp 'magit-refresh) (magit-refresh))
-             ((fboundp 'magit-refresh-buffer) (magit-refresh-buffer)))))))))
+    (run-at-time 0 nil
+                 (lambda ()
+                   (dolist (win (window-list))
+                     (with-current-buffer (window-buffer win)
+                       (when (derived-mode-p 'magit-status-mode)
+                         (ignore-errors
+                           (cond
+                            ((fboundp 'magit-refresh) (magit-refresh))
+                            ((fboundp 'magit-refresh-buffer) (magit-refresh-buffer)))))))))))
 
 ;; Subscribe Magit overview refresh to history changes.
 (add-hook 'magpt-history-changed-hook #'magpt--refresh-magit-status-visible)

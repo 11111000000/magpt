@@ -131,8 +131,8 @@ history changes (no need for the user to press \"g\")."
 
 (defun magpt--status-lines-equal-p (a b)
   "Return non-nil if porcelain snapshots A and B are equivalent ignoring order and blank lines."
-  (let* ((sa (sort (split-string (or (string-trim a) "") "\n" t) #'string<))
-         (sb (sort (split-string (or (string-trim b) "") "\n" t) #'string<)))
+  (let* ((sa (sort (split-string (or a "") "\n" t) #'string<))
+         (sb (sort (split-string (or b "") "\n" t) #'string<)))
     (equal sa sb)))
 
 (defun magpt-magit-insert-ai-overview ()

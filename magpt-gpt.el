@@ -39,11 +39,15 @@
    (t (format "%S" resp))))
 
 (defun magpt--sanitize-response (s)
-  "Sanitize LLM response S: strip common Markdown fences and leading labels."
+  "Sanitize LLM response S: strip leading Answer/Ответ labels and common Markdown fences."
   (let* ((s (string-trim (or s ""))))
-    ;; Strip leading 'Answer:'/'Ответ:' labels (common model prefixes)
-    (setq s (replace-regexp-in-string "\\`\\(?:\\s-*\\(Answer\\|Ответ\\)[:：].*\\n+\\)+" "" s))
-    ;; Strip outer Markdown fences (=lang ... = or ~~~)
+    ;; Drop leading 'Answer:'/'Ответ:' lines (robust, line-by-line).
+    (let* ((lines (split-string s "\n"))
+           (out lines))
+      (while (and out (string-match-p "\\`[ \t]*\\(Answer\\|Ответ\\)[:：]" (car out)))
+        (setq out (cdr out)))
+      (setq s (mapconcat #'identity out "\n")))
+    ;; Strip outer Markdown fences (only = or ~~~; '=' fences are intentionally not stripped).
     (let* ((lines (split-string s "\n"))
            (first (car lines))
            (last  (car (last lines))))

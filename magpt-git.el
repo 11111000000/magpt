@@ -51,21 +51,27 @@
   (executable-find "git"))
 
 (defun magpt--process-git (dir &rest args)
-  "Execute git with ARGS in DIR. Return (EXIT-CODE . STRING-OUTPUT)."
+  "Execute git with ARGS in DIR. Return (EXIT-CODE . STRING-OUTPUT).
+Force UTF-8 decoding of output and disable quoted paths for non-ASCII filenames."
   (let ((default-directory (file-name-as-directory (or dir default-directory))))
     (with-temp-buffer
-      (let* ((start (float-time)))
+      (let* ((start (float-time))
+             ;; Ensure filenames with non-ASCII are not escaped (e.g., \NNN)
+             (full-args (append '("-c" "core.quotepath=false") args))
+             ;; Decode Git output as UTF-8 regardless of locale quirks.
+             (coding-system-for-read 'utf-8-unix)
+             (coding-system-for-write 'utf-8-unix))
         (magpt--log "process-git: start dir=%s args=%s"
-                    default-directory (mapconcat #'identity args " "))
+                    default-directory (mapconcat #'identity full-args " "))
         (let* ((exit (apply #'process-file (or (magpt--executable-git) "git")
-                            nil t nil args))
+                            nil t nil full-args))
                (out  (buffer-string))
                (trimmed (if (string-suffix-p "\n" out) (substring out 0 -1) out))
                (dur (- (float-time) start)))
           (magpt--log "process-git: end exit=%s dur=%.3fs bytes=%d"
                       exit dur (length trimmed))
           ;; Record into per-repo log (for Explain Status → RECENT GIT OUTPUT)
-          (ignore-errors (magpt--recent-git-output-append default-directory exit args trimmed))
+          (ignore-errors (magpt--recent-git-output-append default-directory exit full-args trimmed))
           (cons exit trimmed))))))
 
 (defun magpt--git (dir &rest args)

@@ -1,4 +1,4 @@
-* MaGPT — Universal, Safe Git/Magit AI Assistant for Emacs
+* MaGPT — Universal, Safe Git Assistant for Emacs
 :PROPERTIES:
 :DESCRIPTION: Provider‑agnostic, safety‑first assistant for Git in Emacs, integrating with Magit and gptel. It helps you learn and practice plain Git well—generates commit messages, explains repo state, recommends safe next steps, and records results for review. Always preview‑first, reversible, and under your control.
 :END:

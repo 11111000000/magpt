@@ -256,11 +256,16 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
                                   (or alist '())))))))))
 
 (defun magpt--maybe-load-rc ()
-  "Load and apply user RC then project RC; project overrides user."
+  "Load and apply user RC then project RC; project overrides user.
+Project RC is always re-applied last to ensure precedence even when only the
+user RC changed since the last call."
   ;; Load user-level first to establish defaults.
   (magpt--maybe-load-user-rc)
   ;; Then load project-level, which takes precedence.
-  (magpt--maybe-load-project-rc))
+  (magpt--maybe-load-project-rc)
+  ;; Re-apply project RC data (if available) to enforce precedence consistently.
+  (when (and magpt--proj-rc-state (plist-get magpt--proj-rc-state :data))
+    (magpt--apply-rc (plist-get magpt--proj-rc-state :data))))
 
 ;;;; Section: Logging and diagnostics
 ;;

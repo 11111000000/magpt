@@ -195,7 +195,8 @@
     [["Suggestions"
       ("p" "Preview suggestion..." magpt-ai-actions-preview)
       ("y" "Copy suggestion..." magpt-ai-actions-copy)
-      ("s" "Copy summary" magpt-ai-actions-copy-summary)]
+      ("s" "Copy summary" magpt-ai-actions-copy-summary)
+      ("c" "Commit with AI message" magpt-commit-staged)]
      ["Overview/Tasks"
       ("g" "Get new recommendations (Explain Status)" magpt-explain-status)
       ("r" "Reload from overview" magpt-ai-actions-reload)]]))

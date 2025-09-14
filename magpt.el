@@ -46,6 +46,7 @@
 (require 'vc)
 (require 'project)
 (require 'gptel)
+(defvar gptel-model nil) ;; ensure bound during reloads to avoid mode-line errors
 (require 'magit nil t)     ;; Optional; used when available
 (require 'transient nil t) ;; Optional; used when available
 (require 'magpt-ui-preview nil t)
@@ -315,153 +316,8 @@ user RC changed since the last call."
 
 ;;;; Section: i18n helpers (messages for UI and overview)
 ;;
-;; i18n is intentionally minimal and only for user-facing messages, not prompts.
-
-(defun magpt--lang-code ()
-  "Return language code symbol based on `magpt-info-language'."
-  (let ((l (downcase (or magpt-info-language "english"))))
-    (cond
-     ((string-match-p "\\`\\(ru\\|рус\\)" l) 'ru)
-     ((string-match-p "\\`fr" l) 'fr)
-     (t 'en))))
-
-(defconst magpt--i18n-en
-  '((confirm-send-full . "magpt: Send staged diff to LLM (%d bytes)? ")
-    (confirm-send-trunc . "magpt: Send staged diff to LLM (original %d bytes; sending %d bytes after truncation)? ")
-    (request-llm-commit . "magpt: requesting LLM to generate commit message...")
-    (result-copied . "magpt: result copied to kill-ring and shown in *magpt-commit*")
-    (empty-response . "magpt: empty response from model")
-    (insertion-cancelled . "magpt: insertion cancelled by user")
-    (inserted-into-commit-buffer . "magpt: commit message inserted into commit buffer")
-    (inserted-into-buffer-named . "magpt: commit message inserted into %s")
-    (gptel-error . "magpt: error calling gptel: %s")
-    (gptel-error2 . "magpt/gptel error: %s")
-    (sending-cancelled . "magpt: sending cancelled by user")
-    (no-staged-changes . "No staged changes found (git add ...)")
-    (replace-current-commit-msg? . "Replace the current commit message and insert the generated one? ")
-    (callback-error . "magpt: error in callback: %s")
-    ;; Overview/History (keys used by AI Overview)
-    (overview-response . "Response:")
-    (json-opened . "Opened response in JSON buffer")
-    (json-copied . "Response copied to kill-ring")
-    ;; Section titles (localized UI)
-    (overview-summary . "Summary:")
-    (overview-risks . "Risks:")
-    (overview-suggestions . "Suggestions:")
-    (overview-lint-status . "Lint status:")
-    (overview-issues . "Issues:")
-    (overview-suggestion . "Suggestion:")
-    (overview-name . "Name:")
-    (overview-alternatives . "Alternatives:")
-    (overview-rationale . "Rationale:")
-    (overview-steps . "Steps:")
-    ;; Card titles (localized UI)
-    (overview-card-commit-lint . "Commit Lint / Fix Suggest")
-    (overview-card-branch-name . "Branch Name Suggest")
-    (overview-card-resolve-conflict . "Resolve Conflict (here)")
-    (overview-card-push-pull . "Push/Pull advice")
-    (overview-card-branches . "Branches overview")
-    (overview-card-restore-file . "Recover file (how-to)")
-    (overview-card-reset-files . "Reset files (how-to)")
-    (overview-no-data . "(no data - press [. g] to refresh)")
-    (overview-stale . "(status changed - press [. g] to refresh)")
-    (patch-opened . "Opened response in patch buffer")))
-
-(defconst magpt--i18n-ru
-  '((confirm-send-full . "magpt: Отправить staged‑дифф в LLM (%d байт)? ")
-    (confirm-send-trunc . "magpt: Отправить staged‑дифф в LLM (исходно %d байт; отправим %d байт после усечения)? ")
-    (request-llm-commit . "magpt: запрашиваем LLM для генерации сообщения коммита...")
-    (result-copied . "magpt: результат показан в *magpt-commit* и скопирован в kill-ring")
-    (empty-response . "magpt: пустой ответ от модели")
-    (insertion-cancelled . "magpt: вставка отменена пользователем")
-    (inserted-into-commit-buffer . "magpt: сообщение коммита вставлено в буфер коммита")
-    (inserted-into-buffer-named . "magpt: сообщение коммита вставлено в %s")
-    (gptel-error . "magpt: ошибка вызова gptel: %s")
-    (gptel-error2 . "magpt/gptel ошибка: %s")
-    (sending-cancelled . "magpt: отправка отменена пользователем")
-    (no-staged-changes . "Нет застейдженных изменений (сделайте git add ...)")
-    (replace-current-commit-msg? . "Заменить текущее сообщение коммита и вставить сгенерированное? ")
-    (callback-error . "magpt: ошибка в callback: %s")
-    ;; Обзор/История (ключи, используемые в AI Overview)
-    (overview-response . "Ответ:")
-    (json-opened . "Ответ открыт в JSON буфере")
-    (json-copied . "Ответ скопирован в kill-ring")
-    ;; Заголовки секций (локализованный UI)
-    (overview-summary . "Сводка:")
-    (overview-risks . "Риски:")
-    (overview-suggestions . "Рекомендации:")
-    (overview-lint-status . "Статус lint:")
-    (overview-issues . "Проблемы:")
-    (overview-suggestion . "Предложение:")
-    (overview-name . "Имя:")
-    (overview-alternatives . "Альтернативы:")
-    (overview-rationale . "Обоснование:")
-    (overview-steps . "Шаги:")
-    ;; Заголовки карточек (локализованный UI)
-    (overview-card-commit-lint . "Линт коммита / правка")
-    (overview-card-branch-name . "Имя ветки (рекомендация)")
-    (overview-card-resolve-conflict . "Разрешить конфликт (здесь)")
-    (overview-card-push-pull . "Push/Pull — советы")
-    (overview-card-branches . "Обзор веток")
-    (overview-card-restore-file . "Восстановить файл (инструкция)")
-    (overview-card-reset-files . "Сброс файлов (инструкция)")
-    (overview-no-data . "(нет данных - нажмите [. g] для обновления)")
-    (overview-stale . "(статус изменился - нажмите [. g] для обновления)")
-    (patch-opened . "Патч открыт в буфере")))
-
-(defconst magpt--i18n-fr
-  '((confirm-send-full . "magpt: Envoyer le diff indexé au LLM (%d octets) ? ")
-    (confirm-send-trunc . "magpt: Envoyer le diff indexé au LLM (original %d octets ; envoi de %d octets après troncature) ? ")
-    (request-llm-commit . "magpt: demande au LLM de générer le message de commit...")
-    (result-copied . "magpt: résultat copié dans le kill-ring et affiché dans *magpt-commit*")
-    (empty-response . "magpt: réponse vide du modèle")
-    (insertion-cancelled . "magpt: insertion annulée par l'utilisateur")
-    (inserted-into-commit-buffer . "magpt: message de commit inséré dans le tampon de commit")
-    (inserted-into-buffer-named . "magpt: message de commit inséré dans %s")
-    (gptel-error . "magpt: erreur lors de l'appel à gptel : %s")
-    (gptel-error2 . "erreur magpt/gptel : %s")
-    (sending-cancelled . "magpt: envoi annulé par l'utilisateur")
-    (no-staged-changes . "Aucun changement indexé trouvé (git add ...)")
-    (replace-current-commit-msg? . "Remplacer le message de commit actuel et insérer celui généré ? ")
-    (callback-error . "magpt: erreur dans le callback : %s")
-    ;; Aperçu/Historiques (clés utilisées par l'aperçu IA)
-    (overview-response . "Réponse :")
-    (json-opened . "Réponse ouverte dans un tampon JSON")
-    (json-copied . "Réponse copiée dans le kill-ring")
-    ;; Titres de sections (UI localisée)
-    (overview-summary . "Résumé :")
-    (overview-risks . "Risques :")
-    (overview-suggestions . "Suggestions :")
-    (overview-lint-status . "Statut du lint :")
-    (overview-issues . "Problèmes :")
-    (overview-suggestion . "Suggestion :")
-    (overview-name . "Nom :")
-    (overview-alternatives . "Alternatives :")
-    (overview-rationale . "Justification :")
-    (overview-steps . "Étapes :")
-    ;; Titres des cartes (UI localisée)
-    (overview-card-commit-lint . "Commit Lint / Correction")
-    (overview-card-branch-name . "Suggestion de nom de branche")
-    (overview-card-resolve-conflict . "Résoudre le conflit (ici)")
-    (overview-card-push-pull . "Conseils Push/Pull")
-    (overview-card-branches . "Aperçu des branches")
-    (overview-card-restore-file . "Restaurer un fichier (guide)")
-    (overview-card-reset-files . "Réinitialiser des fichiers (guide)")
-    (overview-no-data . "(aucune donnée — appuyez sur [. g] pour actualiser)")
-    (overview-stale . "(état modifié — appuyez sur [. g] pour actualiser)")
-    (patch-opened . "Patch ouvert dans un tampon")))
-
-(defun magpt--i18n (key &rest args)
-  "Format localized message for KEY with ARGS using `magpt-info-language'."
-  (magpt--maybe-load-rc)
-  (let* ((lang (magpt--lang-code))
-         (tbl (pcase lang
-                ('ru magpt--i18n-ru)
-                ('fr magpt--i18n-fr)
-                (_   magpt--i18n-en)))
-         (fmt (or (alist-get key tbl) (alist-get key magpt--i18n-en) "")))
-    (magpt--log "i18n: key=%S lang=%S fmt=%s" key lang fmt)
-    (if args (apply #'format fmt args) fmt)))
+;; i18n moved into its own module to support more languages.
+(require 'magpt-i18n nil t)
 
 
 ;;;; Section: Size control and prompt building
@@ -623,6 +479,80 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
   '((t :inherit shadow))
   "Neutral/info badge face (e.g., repo/branch chips) in overview header."
   :group 'magpt)
+
+;; -----------------------------------------------------------------------------
+;; Soft restart (safe reload) to recover after re-evaluations or partial loads.
+;; Disables magpt-mode, removes hooks/advices, unloads magpt subfeatures,
+;; reloads modules in dependency order, then re-enables magpt-mode.
+
+(defun magpt--unload-feature-safe (feat)
+  "Unload FEAT if loaded; ignore errors."
+  (when (featurep feat)
+    (ignore-errors (unload-feature feat t))))
+
+(defun magpt--cleanup-hooks-advices ()
+  "Remove hooks/advices installed by magpt integration (best-effort)."
+  (ignore-errors (remove-hook 'magpt-history-changed-hook #'magpt--refresh-magit-status-visible))
+  (ignore-errors (remove-hook 'magpt-history-changed-hook #'magpt--ai-actions-history-updated))
+  (ignore-errors (remove-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview))
+  ;; Debug advices (if were enabled)
+  (when (fboundp 'advice-remove)
+    (ignore-errors (advice-remove 'magit-refresh #'magpt--log-magit-refresh))
+    (ignore-errors (advice-remove 'magit-refresh-buffer #'magpt--log-magit-refresh))
+    (ignore-errors (advice-remove 'magit-section-show #'magpt--log-magit-section-show))
+    (ignore-errors (advice-remove 'magit-section-hide #'magpt--log-magit-section-show))
+    (ignore-errors (advice-remove 'magit-section-toggle #'magpt--log-magit-section-show))))
+
+;;;###autoload
+(defun magpt-restart ()
+  "Soft-reload MaGPT and its Magit/Transient integration safely.
+Use when transient/ui ломается после пересборки или eval-buffer."
+  (interactive)
+  (let ((was-enabled (and (boundp 'magpt-mode) magpt-mode)))
+    ;; 1) Disable integration to detach keys/hooks
+    (when was-enabled (ignore-errors (magpt-mode -1)))
+    ;; 2) Cleanup hooks/advices
+    (magpt--cleanup-hooks-advices)
+    ;; 3) Unload magpt subfeatures only (keep core 'magpt' and external deps)
+    (dolist (feat '(magpt-transient
+                    magpt-magit-overview
+                    magpt-apply
+                    magpt-commit
+                    magpt-tasks-resolve
+                    magpt-tasks-recommend
+                    magpt-tasks-assist
+                    magpt-tasks-core
+                    magpt-ui-preview
+                    magpt-history
+                    magpt-gpt
+                    magpt-git
+                    magpt-i18n))
+      (magpt--unload-feature-safe feat))
+    ;; 4) Ensure external deps present (avoid void-variable/void-function)
+    (require 'gptel nil t)      ;; binds gptel-model, etc.
+    (require 'magit nil t)
+    (require 'transient nil t)
+    ;; 5) Reload modules in dependency order
+    (dolist (feat '(magpt-history
+                    magpt-ui-preview
+                    magpt-git
+                    magpt-gpt
+                    magpt-apply
+                    magpt-tasks-core
+                    magpt-tasks-assist
+                    magpt-tasks-recommend
+                    magpt-tasks-resolve
+                    magpt-magit-overview
+                    magpt-transient
+                    magpt-commit))
+      (require feat nil t))
+    ;; 6) Re-enable mode if it was enabled
+    (when was-enabled (ignore-errors (magpt-mode 1)))
+    ;; 7) Nudge redisplay/Magit
+    (ignore-errors (force-mode-line-update t))
+    (when (and (featurep 'magit) (fboundp 'magit-refresh))
+      (run-at-time 0 nil (lambda () (ignore-errors (magit-refresh)))))
+    (message "magpt: restarted")))
 
 (provide 'magpt)
 

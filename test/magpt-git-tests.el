@@ -33,7 +33,8 @@
           (recent (magpt--recent-git-output-get default-directory)))
      (should (integerp exit))
      (should (stringp recent))
-     (should (string-match-p "git status --porcelain" recent)))))
+     ;; Allow for extra leading -c core.quotepath=false in recent log header.
+     (should (string-match-p "status --porcelain" recent)))))
 
 (ert-deftest magpt-git-signal-on-error ()
   "magpt--git should signal user-error on non-zero exit."

@@ -13,6 +13,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'seq)
 (require 'magit nil t)
 (require 'transient nil t)
 
@@ -20,6 +21,10 @@
 (declare-function magpt-commit-staged "ext:magpt")
 (declare-function magpt-ai-actions-entry "ext:magpt")
 (declare-function magpt-magit-insert-ai-overview "ext:magpt-magit-overview")
+(declare-function magpt-explain-status "magpt-tasks-assist" ())
+(declare-function magpt-explain-push-pull "magpt-tasks-assist" ())
+(declare-function magpt-explain-branches "magpt-tasks-assist" ())
+(declare-function magpt-restore-file-suggest "magpt-tasks-assist" ())
 
 (defface magpt-transient-face
   '((t :inherit font-lock-keyword-face :foreground "green3" :weight bold))
@@ -199,6 +204,9 @@
       ("c" "Commit with AI message" magpt-commit-staged)]
      ["Overview/Tasks"
       ("g" "Get new recommendations (Explain Status)" magpt-explain-status)
+      ("u" "Push/Pull advice" magpt-explain-push-pull)
+      ("b" "Explain branches" magpt-explain-branches)
+      ("f" "Recover file..." magpt-restore-file-suggest)
       ("r" "Reload from overview" magpt-ai-actions-reload)]]))
 
 (unless (fboundp 'magpt-ai-actions)

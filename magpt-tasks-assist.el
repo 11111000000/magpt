@@ -415,12 +415,210 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (magpt--history-append-entry 'branch-name-suggest (or magpt--current-request "") (or json "")
                                "JSON schema: {name, alternatives[], rationale}"))
 
+;; Push/Pull advice
+
+(defun magpt--ctx-push-pull (_ctx)
+  "Collect context for push/pull advice: status -sb, upstream ahead/behind, remotes, recent output."
+  (let* ((root (magpt--project-root))
+         (status (ignore-errors (magpt--git root "status" "-sb")))
+         (remote (ignore-errors (magpt--git root "remote" "-v")))
+         (upstream (ignore-errors (magpt--git root "rev-parse" "--abbrev-ref" "@{upstream}")))
+         (ahead nil) (behind nil))
+    (when upstream
+      (let* ((lr (ignore-errors (magpt--git root "rev-list" "--left-right" "--count" "@{upstream}...HEAD")))
+             (parts (and lr (split-string lr "[ \t]+" t))))
+        (when (and parts (= (length parts) 2))
+          (setq behind (nth 0 parts))
+          (setq ahead  (nth 1 parts)))))
+    (let* ((recent (magpt--recent-git-output-get root))
+           (recent-trunc (string-join (last (split-string (or recent "") "\n" t) 42) "\n"))
+           (keys (when magpt-include-magit-keys-in-suggestions
+                   (magpt--format-magit-keys-cheatsheet-safe)))
+           (preview (string-join
+                     (delq nil
+                           (list
+                            (and status (format "STATUS -sb:\n%s" status))
+                            (and upstream (format "\nUPSTREAM: %s (ahead %s, behind %s)"
+                                                  upstream (or ahead "0") (or behind "0")))
+                            (and remote (format "\n\nREMOTES:\n%s" remote))
+                            (and (and keys (> (length keys) 0))
+                                 (format "\n\nMAGIT KEYS:\n%s"
+                                         (string-join (seq-take (split-string keys "\n" t) 50) "\n")))
+                            (and (> (length recent-trunc) 0)
+                                 (format "\n\nRECENT GIT OUTPUT:\n%s" recent-trunc))))
+                     ""))
+           (bytes (magpt--string-bytes preview)))
+      (list (list :status status :remote remote :upstream upstream
+                  :ahead ahead :behind behind :recent recent-trunc :magit-keys keys)
+            preview bytes))))
+
+(defun magpt--prompt-explain-push-pull (data)
+  "Build prompt to advise on push/pull given DATA."
+  (let* ((ilang (or magpt-info-language "English"))
+         (status (or (plist-get data :status) ""))
+         (up (or (plist-get data :upstream) "(none)"))
+         (ahead (or (plist-get data :ahead) "0"))
+         (behind (or (plist-get data :behind) "0"))
+         (rem (or (plist-get data :remote) ""))
+         (recent (or (plist-get data :recent) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "Advise on pushing and pulling for the current repo state.\n"
+             "Explain consequences/risks (e.g., diverged branches, rebases, merges), and suggest safe next steps.\n"
+             "Return ONLY JSON with fields:\n"
+             "  summary: string,\n"
+             "  risks: array of strings,\n"
+             "  suggestions: array of { title: string, commands: array of strings, keys: array of strings }\n"
+             "Answer STRICTLY in %s for textual fields.\n"
+             "%s"
+             "\n--- STATUS -sb ---\n%s\n"
+             "--- UPSTREAM ---\n%s (ahead %s, behind %s)\n"
+             "--- REMOTES ---\n%s\n"
+             "%s")
+            ilang
+            keys-block
+            status up ahead behind rem
+            (if (> (length recent) 0)
+                (format "--- RECENT GIT OUTPUT ---\n%s\n" recent) ""))))
+
+(defun magpt--render-explain-push-pull (json _data)
+  (magpt--history-append-entry 'explain-push-pull (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[].commands[], suggestions[].keys[]}"))
+
+;;;###autoload
+(defun magpt-explain-push-pull ()
+  "Run the 'Push/Pull advice' assist task (read-only)."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'explain-push-pull))
+
+;; Branches overview
+
+(defun magpt--ctx-branches-overview (_ctx)
+  "Collect local branches, their upstreams and recent graph."
+  (let* ((root (magpt--project-root))
+         (branches (ignore-errors (magpt--git root "branch" "-vv" "--no-color")))
+         (graph (ignore-errors (magpt--git root "log" "--oneline" "--decorate" "--graph" "--all" "-n" "40")))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (and branches (format "BRANCHES (-vv):\n%s" branches))
+                          (and (and keys (> (length keys) 0))
+                               (format "\n\nMAGIT KEYS:\n%s"
+                                       (string-join (seq-take (split-string keys "\n" t) 50) "\n")))
+                          (and graph (format "\n\nRECENT GRAPH:\n%s" graph))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :branches branches :graph graph :magit-keys keys)
+          preview bytes)))
+
+(defun magpt--prompt-branches-overview (data)
+  "Build prompt to explain local/remote branches and safe actions."
+  (let* ((ilang (or magpt-info-language "English"))
+         (branches (or (plist-get data :branches) ""))
+         (graph (or (plist-get data :graph) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "Explain the current branches: which are current, tracking, ahead/behind, stale, or can be cleaned up.\n"
+             "Suggest safe actions (switch, create, delete merged, set upstream, fetch/prune, rename).\n"
+             "Return ONLY JSON with fields: summary, risks[], suggestions[].{title,commands[],keys[]}.\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- BRANCHES -vv ---\n%s\n"
+             "\n--- RECENT GRAPH ---\n%s\n")
+            ilang keys-block branches graph)))
+
+(defun magpt--render-branches-overview (json _data)
+  (magpt--history-append-entry 'explain-branches (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[]}"))
+
+;;;###autoload
+(defun magpt-explain-branches ()
+  "Run the 'Branches overview' assist task (read-only)."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'explain-branches))
+
+;; Recover file (how-to)
+
+(defun magpt--ctx-restore-file-suggest (ctx)
+  "Collect context to recover a file from a commit-ish. CTX may contain :path and :rev."
+  (let* ((root (magpt--project-root))
+         (default-path
+          (when (and buffer-file-name (string-prefix-p (file-name-as-directory root)
+                                                       (file-name-directory (expand-file-name buffer-file-name))))
+            (file-relative-name (expand-file-name buffer-file-name) root)))
+         (path (or (plist-get ctx :path)
+                   (let* ((cands (ignore-errors (magpt--git root "ls-files" "-co" "--exclude-standard")))
+                          (ls (and cands (split-string cands "\n" t))))
+                     (completing-read "File to recover: " ls nil t nil nil default-path))))
+         (rev  (or (plist-get ctx :rev)
+                   (read-string "Recover from revision (commit-ish): " "HEAD")))
+         (log (ignore-errors (magpt--git root "log" "--oneline" "--decorate" "--follow" "-n" "30" rev "--" path)))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (format "FILE: %s\nREV: %s" path rev)
+                          (and (and keys (> (length keys) 0))
+                               (format "\n\nMAGIT KEYS:\n%s"
+                                       (string-join (seq-take (split-string keys "\n" t) 50) "\n")))
+                          (and log (format "\n\nRECENT FILE HISTORY:\n%s" log))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :path path :rev rev :log log :magit-keys keys) preview bytes)))
+
+(defun magpt--prompt-restore-file-suggest (data)
+  "Build prompt that explains options to recover a file from a commit-ish."
+  (let* ((ilang (or magpt-info-language "English"))
+         (path (plist-get data :path))
+         (rev (plist-get data :rev))
+         (log (or (plist-get data :log) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "I need to recover a file from a past commit. Explain safe options and provide commands.\n"
+             "Cover: git restore --source=REV -- <path> (worktree and/or index), old 'git checkout REV -- <path>', and when to use each.\n"
+             "Warn about overwriting unstaged/staged changes and how to stage selectively afterward.\n"
+             "Return ONLY JSON with fields: summary, risks[], suggestions[].{title,commands[],keys[]}.\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- TARGET ---\nPATH: %s\nREV: %s\n"
+             "\n--- RECENT FILE HISTORY ---\n%s\n")
+            ilang keys-block path rev log)))
+
+(defun magpt--render-restore-file-suggest (json _data)
+  (magpt--history-append-entry 'restore-file-suggest (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[]}"))
+
+;;;###autoload
+(defun magpt-restore-file-suggest (&optional path rev)
+  "Run 'Recover file (how-to)' assist task; prompts for PATH/REV if not provided."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'restore-file-suggest (list :path path :rev rev)))
+
 (defvar magpt--assist-tasks-registered nil
   "Non-nil when assist tasks have been registered in the registry.")
 
 (defun magpt--register-assist-tasks ()
   "Register Phase 1 assist tasks into the registry (read-only tasks)."
   (unless magpt--assist-tasks-registered
+    ;; Explain Status (no confirm)
     (magpt-register-task
      (magpt--task :name 'explain-status
                   :title "Explain current status"
@@ -429,7 +627,8 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                   :prompt-fn  #'magpt--prompt-explain-status
                   :render-fn  #'magpt--render-explain-status
                   :apply-fn   nil
-                  :confirm-send? nil)) ;; Explain Status is safe — no confirmation required
+                  :confirm-send? nil))
+    ;; Commit Lint/Fix Suggest
     (magpt-register-task
      (magpt--task :name 'commit-lint-suggest
                   :title "Commit Lint / Fix Suggest"
@@ -439,6 +638,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                   :render-fn  #'magpt--render-commit-lint
                   :apply-fn   nil
                   :confirm-send? t))
+    ;; Branch Name Suggest
     (magpt-register-task
      (magpt--task :name 'branch-name-suggest
                   :title "Branch Name Suggest"
@@ -446,6 +646,36 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                   :context-fn #'magpt--ctx-branch-name
                   :prompt-fn  #'magpt--prompt-branch-name
                   :render-fn  #'magpt--render-branch-name
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Push/Pull advice
+    (magpt-register-task
+     (magpt--task :name 'explain-push-pull
+                  :title "Push/Pull advice"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-push-pull
+                  :prompt-fn  #'magpt--prompt-explain-push-pull
+                  :render-fn  #'magpt--render-explain-push-pull
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Branches overview
+    (magpt-register-task
+     (magpt--task :name 'explain-branches
+                  :title "Branches overview"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-branches-overview
+                  :prompt-fn  #'magpt--prompt-branches-overview
+                  :render-fn  #'magpt--render-branches-overview
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Recover file (how-to)
+    (magpt-register-task
+     (magpt--task :name 'restore-file-suggest
+                  :title "Recover file (how-to)"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-restore-file-suggest
+                  :prompt-fn  #'magpt--prompt-restore-file-suggest
+                  :render-fn  #'magpt--render-restore-file-suggest
                   :apply-fn   nil
                   :confirm-send? t))
     (setq magpt--assist-tasks-registered t)))

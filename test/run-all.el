@@ -12,7 +12,7 @@
 (require 'magpt-gpt-tests)
 (require 'magpt-magit-overview-tests)
 (require 'magpt-tasks-recommend-tests)
-(require 'magpt-transient-tests)
+
 
 
 

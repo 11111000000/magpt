@@ -309,7 +309,7 @@ history changes (no need for the user to press \"g\")."
         ;; Child section: Commit Lint / Fix Suggest
         (when cl
           (magit-insert-section (magit-section 'magpt-ai-card-commit-lint)
-            (magit-insert-heading "Commit Lint / Fix Suggest")
+            (magit-insert-heading (magpt--i18n 'overview-card-commit-lint))
             (let ((magpt-ui-density 'compact))
               (let ((data (and (plist-get cl :valid) (magpt--entry-parse-json-safe cl))))
                 (if data
@@ -338,7 +338,7 @@ history changes (no need for the user to press \"g\")."
           ;; Child section: Branch Name Suggest
           (when bn
             (magit-insert-section (magit-section 'magpt-ai-card-branch-name)
-              (magit-insert-heading "Branch Name Suggest")
+              (magit-insert-heading (magpt--i18n 'overview-card-branch-name))
               (let ((magpt-ui-density 'compact))
                 (let ((data (and (plist-get bn :valid) (magpt--entry-parse-json-safe bn))))
                   (if data
@@ -366,7 +366,7 @@ history changes (no need for the user to press \"g\")."
             ;; Child section: Resolve Conflict (if present)
             (when rc
               (magit-insert-section (magit-section 'magpt-ai-card-resolve-conflict)
-                (magit-insert-heading "Resolve Conflict (here)")
+                (magit-insert-heading (magpt--i18n 'overview-card-resolve-conflict))
                 (let ((magpt-ui-density 'compact))
                   (insert (magpt--i18n 'overview-response) "\n")
                   (insert (string-trim-right (plist-get rc :response)) "\n\n")
@@ -375,7 +375,7 @@ history changes (no need for the user to press \"g\")."
             ;; Child card: Push/Pull advice
             (when pp
               (magit-insert-section (magit-section 'magpt-ai-card-push-pull)
-                (magit-insert-heading "Push/Pull advice")
+                (magit-insert-heading (magpt--i18n 'overview-card-push-pull))
                 (let ((magpt-ui-density 'compact))
                   (let ((data (and (plist-get pp :valid) (magpt--entry-parse-json-safe pp))))
                     (if data
@@ -396,7 +396,18 @@ history changes (no need for the user to press \"g\")."
                                                 'follow-link t
                                                 'help-echo "Insert command into eshell (bottom popup)"
                                                 'magpt-command cmd)
-                            (insert "\n\n")))
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (st steps)
+                                  (insert "        - " (format "%s" st) "\n"))))))
                       (insert (magpt--i18n 'overview-response) "\n")
                       (insert (string-trim-right (plist-get pp :response)) "\n\n")))
                   (when (fboundp 'magpt--insert-entry-buttons)
@@ -404,7 +415,7 @@ history changes (no need for the user to press \"g\")."
             ;; Child card: Branches overview
             (when br
               (magit-insert-section (magit-section 'magpt-ai-card-branches)
-                (magit-insert-heading "Branches overview")
+                (magit-insert-heading (magpt--i18n 'overview-card-branches))
                 (let ((magpt-ui-density 'compact))
                   (let ((data (and (plist-get br :valid) (magpt--entry-parse-json-safe br))))
                     (if data
@@ -425,7 +436,19 @@ history changes (no need for the user to press \"g\")."
                                                 'follow-link t
                                                 'help-echo "Insert command into eshell (bottom popup)"
                                                 'magpt-command cmd)
-                            (insert "\n\n")))
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first))
+                                       )
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (st steps)
+                                  (insert "        - " (format "%s" st) "\n"))))))
                       (insert (magpt--i18n 'overview-response) "\n")
                       (insert (string-trim-right (plist-get br :response)) "\n\n")))
                   (when (fboundp 'magpt--insert-entry-buttons)
@@ -433,7 +456,7 @@ history changes (no need for the user to press \"g\")."
             ;; Child card: Recover file (how-to)
             (when rf
               (magit-insert-section (magit-section 'magpt-ai-card-restore-file)
-                (magit-insert-heading "Recover file (how-to)")
+                (magit-insert-heading (magpt--i18n 'overview-card-restore-file))
                 (let ((magpt-ui-density 'compact))
                   (let ((data (and (plist-get rf :valid) (magpt--entry-parse-json-safe rf))))
                     (if data
@@ -454,7 +477,18 @@ history changes (no need for the user to press \"g\")."
                                                 'follow-link t
                                                 'help-echo "Insert command into eshell (bottom popup)"
                                                 'magpt-command cmd)
-                            (insert "\n\n")))
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (st steps)
+                                  (insert "        - " (format "%s" st) "\n"))))))
                       (insert (magpt--i18n 'overview-response) "\n")
                       (insert (string-trim-right (plist-get rf :response)) "\n\n")))
                   (when (fboundp 'magpt--insert-entry-buttons)

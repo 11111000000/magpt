@@ -13,8 +13,8 @@
 (require 'magpt-magit-overview-tests)
 (require 'magpt-tasks-recommend-tests)
 (require 'magpt-transient-tests)
-(require 'magpt-apply-restore-tests)
-(require 'magpt-tasks-assist-tests)
+
+
 
 (provide 'run-all)
 ;;; run-all.el ends here

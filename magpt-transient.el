@@ -259,6 +259,29 @@ Relies on newest-first ordering of `magpt--history-entries'."
                      (error-message-string err))))))
   (message "magpt: AI actions reloaded from overview"))
 
+(defcustom magpt-ai-actions-auto-reload t
+  "If non-nil, automatically refresh AI Actions suggestions when history changes.
+When the AI Actions transient is open, the UI is also reloaded."
+  :type 'boolean
+  :group 'magpt)
+
+(defun magpt--ai-actions-history-updated ()
+  "Hook: called when AI history changes. Refresh AI Actions state/UI."
+  (when magpt-ai-actions-auto-reload
+    (when (fboundp 'magpt--log)
+      (magpt--log "ai-actions: history-changed; refreshing suggestions cache"))
+    ;; Refresh internal cache
+    (ignore-errors (magpt--ai-actions-init))
+    ;; If AI Actions transient is currently open, reload UI
+    (when (and (featurep 'transient)
+               (boundp 'transient--prefix) transient--prefix
+               (ignore-errors (eq (oref transient--prefix command) 'magpt-ai-actions)))
+      (when (fboundp 'magpt--log)
+        (magpt--log "ai-actions: transient open → reloading UI"))
+      (ignore-errors (magpt-ai-actions-reload)))))
+
+(add-hook 'magpt-history-changed-hook #'magpt--ai-actions-history-updated)
+
 (with-eval-after-load 'transient
   (when (fboundp 'magpt--log)
     (magpt--log "transient: defining magpt-ai-actions prefix"))

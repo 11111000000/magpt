@@ -247,7 +247,7 @@ Relies on newest-first ordering of `magpt--history-entries'."
       (require 'magpt-apply nil t))
     (if (fboundp 'magpt--eshell-popup-insert)
         (magpt--eshell-popup-insert (string-trim first))
-      (user-error "magpt: eshell helper not available (magpt-apply not loaded)")))))
+      (user-error "magpt: eshell helper not available (magpt-apply not loaded)"))))
 
 (defun magpt-ai-actions-copy-summary ()
   "Copy the latest summary to the kill-ring."

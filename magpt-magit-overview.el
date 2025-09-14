@@ -439,8 +439,7 @@ history changes (no need for the user to press \"g\")."
                                                 'magpt-command cmd)
                             (insert "\n\n"))
                           (when magpt-overview-show-educational-fields
-                            (let ((rat (and first (alist-get 'rationale first))
-                                       )
+                            (let ((rat (and first (alist-get 'rationale first)))
                                   (steps (and first (alist-get 'steps first))))
                               (when (stringp rat)
                                 (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
@@ -536,7 +535,7 @@ history changes (no need for the user to press \"g\")."
                     (magpt--insert-entry-buttons rf)))))
             ;; Hint line with key shortcut.
             (insert (propertize "  [.] AI actions\n" 'face 'magpt-badge-info-face))
-            (insert "\n"))))))))
+            (insert "\n")))))))
 
 (provide 'magpt-magit-overview)
 

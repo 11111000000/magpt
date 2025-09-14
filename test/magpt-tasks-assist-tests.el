@@ -54,5 +54,56 @@
       (should (string-match-p "--- UPSTREAM ---" p))
       (should (string-match-p "--- REMOTES ---" p)))))
 
+;; P2 tasks — prompt shape/tests
+
+(ert-deftest magpt-prompt-reset-files-includes-status-marker ()
+  "Reset-files prompt should include porcelain status section."
+  (let* ((data (list :porcelain " M a.txt\n" :magit-keys "")))
+    (let ((p (magpt--prompt-reset-files-suggest data)))
+      (should (string-match-p "--- STATUS (porcelain) ---" p))
+      (should (string-match-p " M a.txt" p)))))
+
+(ert-deftest magpt-prompt-undo-commits-sections ()
+  "Undo-commits prompt should include all required sections."
+  (let* ((data (list :status "## main" :upstream "origin/main"
+                     :ahead-behind "0 1" :log "c1\nc2" :magit-keys "")))
+    (let ((p (magpt--prompt-undo-commits data)))
+      (should (string-match-p "--- STATUS -sb ---" p))
+      (should (string-match-p "--- UPSTREAM ---" p))
+      (should (string-match-p "--- AHEAD/BEHIND ---" p))
+      (should (string-match-p "--- LOG ---" p)))))
+
+(ert-deftest magpt-prompt-reflog-rescue-sections ()
+  "Reflog-rescue prompt should include reflog section."
+  (let* ((data (list :reflog "abc HEAD@{0} msg" :magit-keys "")))
+    (let ((p (magpt--prompt-reflog-rescue data)))
+      (should (string-match-p "--- REFLOG ---" p))
+      (should (string-match-p "HEAD@{0}" p)))))
+
+(ert-deftest magpt-prompt-stash-sections ()
+  "Stash prompt should include status and stash list sections."
+  (let* ((data (list :status " M a.txt" :stash "stash@{0}: WIP" :magit-keys "")))
+    (let ((p (magpt--prompt-stash data)))
+      (should (string-match-p "--- STATUS ---" p))
+      (should (string-match-p "--- STASH LIST ---" p)))))
+
+(ert-deftest magpt-prompt-detached-head-sections ()
+  "Detached HEAD prompt should include branch and last commit sections."
+  (let* ((data (list :branch "HEAD" :last "abc initial" :magit-keys "")))
+    (let ((p (magpt--prompt-detached-head data)))
+      (should (string-match-p "--- BRANCH ---" p))
+      (should (string-match-p "--- LAST COMMIT ---" p)))))
+
+(ert-deftest magpt-prompt-set-upstream-sections ()
+  "Set-upstream prompt should include status, branch, upstream and remotes."
+  (let* ((data (list :status "## main" :branch "main"
+                     :upstream "origin/main" :remote "origin git@example"
+                     :magit-keys "")))
+    (let ((p (magpt--prompt-set-upstream data)))
+      (should (string-match-p "--- STATUS -sb ---" p))
+      (should (string-match-p "--- BRANCH ---" p))
+      (should (string-match-p "--- UPSTREAM ---" p))
+      (should (string-match-p "--- REMOTES ---" p)))))
+
 (provide 'magpt-tasks-assist-tests)
 ;;; magpt-tasks-assist-tests.el ends here

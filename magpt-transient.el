@@ -25,6 +25,10 @@
 (declare-function magpt-explain-push-pull "magpt-tasks-assist" ())
 (declare-function magpt-explain-branches "magpt-tasks-assist" ())
 (declare-function magpt-restore-file-suggest "magpt-tasks-assist" ())
+;; History API
+(declare-function magpt--history-last-entry-for "magpt-history" (task))
+(declare-function magpt--entry-parse-json-safe "magpt-history" (entry))
+(defvar magpt--history-entries)
 
 (defface magpt-transient-face
   '((t :inherit font-lock-keyword-face :foreground "green3" :weight bold))

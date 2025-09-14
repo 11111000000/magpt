@@ -147,7 +147,10 @@ history changes (no need for the user to press \"g\")."
       (let* ((ex (magpt--history-last-entry-for 'explain-status))
              (cl (magpt--history-last-entry-for 'commit-lint-suggest))
              (bn (magpt--history-last-entry-for 'branch-name-suggest))
-             (rc (magpt--history-last-entry-for 'resolve-conflict-here)))
+             (rc (magpt--history-last-entry-for 'resolve-conflict-here))
+             (pp (magpt--history-last-entry-for 'explain-push-pull))
+             (br (magpt--history-last-entry-for 'explain-branches))
+             (rf (magpt--history-last-entry-for 'restore-file-suggest)))
         (if (not ex)
             (insert (format "  %s\n" (magpt--i18n 'overview-no-data)))
           (progn

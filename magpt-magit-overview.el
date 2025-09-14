@@ -30,6 +30,12 @@ automatic refresh and preserve the user's manual section visibility."
   :type 'boolean
   :group 'magpt)
 
+(defcustom magpt-magit-preserve-visibility t
+  "If non-nil, try to preserve Magit section visibility on auto-refresh.
+Uses Magit's save/restore helpers when available."
+  :type 'boolean
+  :group 'magpt)
+
 ;; Forward declarations from magpt.el (to silence byte-compiler).
 (declare-function magpt--history-last-entry-for "magpt-history" (task))
 (declare-function magpt--entry-parse-json-safe "magpt-history" (entry))
@@ -110,10 +116,16 @@ history changes (no need for the user to press \"g\")."
                    (dolist (win (window-list))
                      (with-current-buffer (window-buffer win)
                        (when (derived-mode-p 'magit-status-mode)
-                         (ignore-errors
-                           (cond
-                            ((fboundp 'magit-refresh) (magit-refresh))
-                            ((fboundp 'magit-refresh-buffer) (magit-refresh-buffer)))))))))))
+                         (let ((vis (and magpt-magit-preserve-visibility
+                                         (fboundp 'magit-save-section-visibility)
+                                         (condition-case _ (magit-save-section-visibility) (error nil)))))
+                           (ignore-errors
+                             (cond
+                              ((fboundp 'magit-refresh) (magit-refresh))
+                              ((fboundp 'magit-refresh-buffer) (magit-refresh-buffer))))
+                           (when (and vis magpt-magit-preserve-visibility
+                                      (fboundp 'magit-restore-section-visibility))
+                             (ignore-errors (magit-restore-section-visibility vis)))))))))))
 
 ;; Subscribe Magit overview refresh to history changes.
 (add-hook 'magpt-history-changed-hook #'magpt--refresh-magit-status-visible)
@@ -322,6 +334,93 @@ history changes (no need for the user to press \"g\")."
                     (insert (string-trim-right (plist-get rc :response)) "\n\n")
                     (when (fboundp 'magpt--insert-entry-buttons)
                       (magpt--insert-entry-buttons rc)))))
+              ;; Child card: Push/Pull advice
+              (when pp
+                (magit-insert-section (magit-section 'magpt-ai-card-push-pull)
+                  (magit-insert-heading "Push/Pull advice")
+                  (let ((magpt-ui-density 'compact))
+                    (let ((data (and (plist-get pp :valid) (magpt--entry-parse-json-safe pp))))
+                      (if data
+                          (let* ((summary (alist-get 'summary data))
+                                 (sugs (or (alist-get 'suggestions data) '()))
+                                 (first (car sugs))
+                                 (cmds (and first (alist-get 'commands first)))
+                                 (cmd (and (listp cmds) (car cmds))))
+                            (when (stringp summary)
+                              (dolist (ln (split-string (string-trim-right summary) "\n"))
+                                (insert "  " ln "\n")))
+                            (when (stringp cmd)
+                              (insert "\n")
+                              (insert (format "      $ %s\n" cmd))
+                              (insert "      ")
+                              (insert-text-button "[Eshell]"
+                                                  'action #'magpt--btn-eshell-insert
+                                                  'follow-link t
+                                                  'help-echo "Insert command into eshell (bottom popup)"
+                                                  'magpt-command cmd)
+                              (insert "\n\n")))
+                        (insert (magpt--i18n 'overview-response) "\n")
+                        (insert (string-trim-right (plist-get pp :response)) "\n\n")))
+                    (when (fboundp 'magpt--insert-entry-buttons)
+                      (magpt--insert-entry-buttons pp)))))
+              ;; Child card: Branches overview
+              (when br
+                (magit-insert-section (magit-section 'magpt-ai-card-branches)
+                  (magit-insert-heading "Branches overview")
+                  (let ((magpt-ui-density 'compact))
+                    (let ((data (and (plist-get br :valid) (magpt--entry-parse-json-safe br))))
+                      (if data
+                          (let* ((summary (alist-get 'summary data))
+                                 (sugs (or (alist-get 'suggestions data) '()))
+                                 (first (car sugs))
+                                 (cmds (and first (alist-get 'commands first)))
+                                 (cmd (and (listp cmds) (car cmds))))
+                            (when (stringp summary)
+                              (dolist (ln (split-string (string-trim-right summary) "\n"))
+                                (insert "  " ln "\n")))
+                            (when (stringp cmd)
+                              (insert "\n")
+                              (insert (format "      $ %s\n" cmd))
+                              (insert "      ")
+                              (insert-text-button "[Eshell]"
+                                                  'action #'magpt--btn-eshell-insert
+                                                  'follow-link t
+                                                  'help-echo "Insert command into eshell (bottom popup)"
+                                                  'magpt-command cmd)
+                              (insert "\n\n")))
+                        (insert (magpt--i18n 'overview-response) "\n")
+                        (insert (string-trim-right (plist-get br :response)) "\n\n")))
+                    (when (fboundp 'magpt--insert-entry-buttons)
+                      (magpt--insert-entry-buttons br)))))
+              ;; Child card: Recover file (how-to)
+              (when rf
+                (magit-insert-section (magit-section 'magpt-ai-card-restore-file)
+                  (magit-insert-heading "Recover file (how-to)")
+                  (let ((magpt-ui-density 'compact))
+                    (let ((data (and (plist-get rf :valid) (magpt--entry-parse-json-safe rf))))
+                      (if data
+                          (let* ((summary (alist-get 'summary data))
+                                 (sugs (or (alist-get 'suggestions data) '()))
+                                 (first (car sugs))
+                                 (cmds (and first (alist-get 'commands first)))
+                                 (cmd (and (listp cmds) (car cmds))))
+                            (when (stringp summary)
+                              (dolist (ln (split-string (string-trim-right summary) "\n"))
+                                (insert "  " ln "\n")))
+                            (when (stringp cmd)
+                              (insert "\n")
+                              (insert (format "      $ %s\n" cmd))
+                              (insert "      ")
+                              (insert-text-button "[Eshell]"
+                                                  'action #'magpt--btn-eshell-insert
+                                                  'follow-link t
+                                                  'help-echo "Insert command into eshell (bottom popup)"
+                                                  'magpt-command cmd)
+                              (insert "\n\n")))
+                        (insert (magpt--i18n 'overview-response) "\n")
+                        (insert (string-trim-right (plist-get rf :response)) "\n\n")))
+                    (when (fboundp 'magpt--insert-entry-buttons)
+                      (magpt--insert-entry-buttons rf)))))
               ;; Hint line with key shortcut.
               (insert (propertize "  [.] AI actions\n" 'face 'magpt-badge-info-face))
               (insert "\n"))))))))

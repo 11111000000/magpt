@@ -108,24 +108,45 @@
 (defvar magpt--ai-actions-summary nil
   "Summary string from the last explain-status, if available.")
 
+(defcustom magpt-ai-actions-source-tasks
+  '(explain-status explain-push-pull explain-branches restore-file-suggest)
+  "Tasks to source suggestions from for AI Actions.
+The newest valid entry among these tasks supplies summary and suggestions."
+  :type '(repeat (choice (const explain-status)
+                         (const explain-push-pull)
+                         (const explain-branches)
+                         (const restore-file-suggest)))
+  :group 'magpt)
+
+(defun magpt--ai--normalize-suggestions (data)
+  "Return normalized suggestions plist list from DATA alist (JSON)."
+  (let ((sugs (and (listp data) (alist-get 'suggestions data))))
+    (when (listp sugs)
+      (mapcar
+       (lambda (s)
+         (let* ((title (or (alist-get 'title s) ""))
+                (cmds  (mapconcat (lambda (c) (format "%s" c))
+                                  (or (alist-get 'commands s) '()) "\n"))
+                (keys  (let ((ks (or (alist-get 'keys s)
+                                     (alist-get 'magit_keys s))))
+                         (and (listp ks) (seq-filter #'stringp ks)))))
+           (list :title title :commands cmds :keys keys)))
+       sugs))))
+
+(defun magpt--ai--latest-entry-for-any (tasks)
+  "Return latest entry whose :task is a member of TASKS.
+Relies on newest-first ordering of `magpt--history-entries'."
+  (let ((set (and (listp tasks) tasks)))
+    (seq-find (lambda (e) (memq (plist-get e :task) set)) magpt--history-entries)))
+
 (defun magpt--ai-suggestions-from-last-explain-status ()
-  "Extract suggestions list and summary from the last 'explain-status' history entry."
-  (let* ((e (magpt--history-last-entry-for 'explain-status))
+  "Extract suggestions/summary from the newest of `magpt-ai-actions-source-tasks'."
+  (let* ((e (magpt--ai--latest-entry-for-any magpt-ai-actions-source-tasks))
          (data (and e (magpt--entry-parse-json-safe e))))
     (when data
-      (let ((sugs (or (alist-get 'suggestions data) '()))
-            (summary (alist-get 'summary data)))
-        (setq magpt--ai-actions-summary (and (stringp summary) summary))
-        (mapcar
-         (lambda (s)
-           (let* ((title (or (alist-get 'title s) ""))
-                  (cmds  (mapconcat (lambda (c) (format "%s" c))
-                                    (or (alist-get 'commands s) '()) "\n"))
-                  (keys  (let ((ks (or (alist-get 'keys s)
-                                       (alist-get 'magit_keys s))))
-                           (and (listp ks) (seq-filter #'stringp ks)))))
-             (list :title title :commands cmds :keys keys)))
-         sugs)))))
+      (let ((summary (alist-get 'summary data)))
+        (setq magpt--ai-actions-summary (and (stringp summary) summary)))
+      (magpt--ai--normalize-suggestions data))))
 
 (defun magpt--ai-actions-init ()
   "Initialize AI actions state from history."
@@ -152,7 +173,7 @@
   (interactive)
   (magpt--ai-actions-init)
   (if (zerop (length magpt--ai-actions-suggestions))
-      (user-error "No suggestions found; run magpt-explain-status first")
+      (user-error "No suggestions found; run [. g], or u/b/f")
     (let* ((i (or idx (magpt--ai-actions-choose-index)))
            (sug (nth i magpt--ai-actions-suggestions))
            (title (plist-get sug :title))
@@ -172,7 +193,7 @@
   (interactive)
   (magpt--ai-actions-init)
   (if (zerop (length magpt--ai-actions-suggestions))
-      (user-error "No suggestions found; run magpt-explain-status first")
+      (user-error "No suggestions found; run [. g], or u/b/f")
     (let* ((i (or idx (magpt--ai-actions-choose-index)))
            (sug (nth i magpt--ai-actions-suggestions))
            (cmds (plist-get sug :commands)))
@@ -186,7 +207,7 @@
     (magpt--ai-actions-init))
   (if (not (and (stringp magpt--ai-actions-summary)
                 (> (length magpt--ai-actions-summary) 0)))
-      (user-error "No summary available; run magpt-explain-status first")
+      (user-error "No summary available; run [. g], or u/b/f")
     (kill-new magpt--ai-actions-summary)
     (message "magpt: summary copied")))
 
@@ -200,7 +221,7 @@
 
 (when (featurep 'transient)
   (transient-define-prefix magpt-ai-actions ()
-    "AI actions (from last Explain Status result)"
+    "AI actions (magpt)"
     [["Suggestions"
       ("p" "Preview suggestion..." magpt-ai-actions-preview)
       ("y" "Copy suggestion..." magpt-ai-actions-copy)

@@ -277,6 +277,69 @@
       (user-error "No command to insert"))
     (magpt--eshell-popup-insert cmd)))
 
+;; Restore file helpers
+
+(defun magpt--entry-target-defaults (entry)
+  "Extract default :path and :rev from ENTRY plist, if present."
+  (list :path (plist-get entry :target-path)
+        :rev  (or (plist-get entry :target-rev) "HEAD")))
+
+(defun magpt--read-restore-file-args (entry)
+  "Read (ROOT PATH REV) for preview/restore, defaulting from ENTRY when possible."
+  (let* ((root (magpt--project-root))
+         (defs (and (listp entry) (magpt--entry-target-defaults entry)))
+         (def-path (plist-get defs :path))
+         (def-rev  (plist-get defs :rev))
+         (cands (ignore-errors (magpt--git root "ls-files" "-co" "--exclude-standard")))
+         (ls (and cands (split-string cands "\n" t)))
+         (path (completing-read "File to preview/restore: " ls nil t nil nil def-path))
+         (rev  (read-string "Revision (commit-ish): " (or def-rev "HEAD"))))
+    (list root path rev)))
+
+(defun magpt--btn-restore-file-preview (button)
+  "Preview diff or blob for selected REV:PATH in a read-only buffer."
+  (let* ((e (button-get button 'magpt-entry))
+         (vals (magpt--read-restore-file-args e))
+         (root (nth 0 vals)) (path (nth 1 vals)) (rev (nth 2 vals))
+         (diff (condition-case _ (magpt--git root "diff" "--no-color" rev "--" path)
+                 (error ""))))
+    (if (and (stringp diff) (> (length diff) 0))
+        (magpt--btn-preview-text (format "diff: %s @ %s" path rev) diff 'diff)
+      (let ((blob (condition-case _ (magpt--git root "show" (format "%s:%s" rev path))
+                    (error ""))))
+        (if (> (length blob) 0)
+            (magpt--btn-preview-text (format "show: %s:%s" rev path) blob 'text)
+          (user-error "No diff or blob available for %s at %s" path rev))))))
+
+(defun magpt--path-has-unstaged-p (root path)
+  "Return non-nil when PATH has unstaged changes."
+  (condition-case _ (let ((out (magpt--git root "diff" "--name-only" "--" path)))
+                      (> (length (string-trim out)) 0))
+    (error nil)))
+
+(defun magpt--btn-restore-file-apply (button)
+  "Restore file from REV to worktree/index after confirmation.
+Offers stashing unstaged changes first (stash -k) if restoring to worktree."
+  (unless magpt-allow-apply-safe-ops
+    (user-error "Applying operations is disabled (magpt-allow-apply-safe-ops is nil)"))
+  (let* ((e (button-get button 'magpt-entry))
+         (vals (magpt--read-restore-file-args e))
+         (root (nth 0 vals)) (path (nth 1 vals)) (rev (nth 2 vals))
+         (where (completing-read "Restore to: " '("worktree" "index" "both") nil t nil nil "worktree")))
+    (when (and (member where '("worktree" "both"))
+               (magpt--path-has-unstaged-p root path))
+      (when (y-or-n-p (format "Unstaged changes in %s. Stash them first (keep index)? " path))
+        (ignore-errors (magpt--git root "stash" "push" "-k" "-m"
+                                   (format "magpt: backup %s" path) "--" path))))
+    (condition-case err
+        (progn
+          (when (member where '("index" "both"))
+            (magpt--git root "restore" "--source" rev "--staged" "--" path))
+          (when (member where '("worktree" "both"))
+            (magpt--git root "restore" "--source" rev "--" path))
+          (message "magpt: restored %s from %s → %s" path rev where))
+      (error (user-error "Git error: %s" (error-message-string err))))))
+
 ;; Button inserter
 
 (defun magpt--insert-entry-buttons (entry)
@@ -378,7 +441,21 @@
                            'action #'magpt--btn-copy-branch-rationale
                            'follow-link t
                            'help-echo "Copy rationale"
-                           'magpt-entry entry)))
+                           'magpt-entry entry))
+      ('restore-file-suggest
+       (insert "  ")
+       (insert-text-button "[Preview file@rev]"
+                           'action #'magpt--btn-restore-file-preview
+                           'follow-link t
+                           'help-echo "Show diff or blob for selected revision"
+                           'magpt-entry entry)
+       (when magpt-allow-apply-safe-ops
+         (insert "  ")
+         (insert-text-button "[Restore...]"
+                             'action #'magpt--btn-restore-file-apply
+                             'follow-link t
+                             'help-echo "git restore --source REV (worktree/index)"
+                             'magpt-entry entry))))
     (insert "\n")
     (put-text-property start (point) 'read-only t)))
 

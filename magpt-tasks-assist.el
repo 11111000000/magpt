@@ -43,6 +43,12 @@ use an empty list instead of guessing."
   :type 'boolean
   :group 'magpt)
 
+(defcustom magpt-educational-mode t
+  "If non-nil, allow prompts to request optional teaching fields (rationale, steps).
+Models may include these fields in suggestions[]. They are ignored by the UI unless shown explicitly."
+  :type 'boolean
+  :group 'magpt)
+
 (defun magpt--magit-keys-runtime ()
   "Return an alist of (DESCRIPTION . (KEYS...)) for common Magit actions.
 Keys are resolved from `magit-status-mode-map' and Transient suffixes when available."
@@ -293,6 +299,7 @@ Be sure to consider all messages, errors, hints and warnings present in the 'REC
              "    commands: array of strings,\n"
              "    keys: array of strings  // Magit key sequences to recommend; if unknown — []\n"
              "  }\n"
+             "You MAY include optional fields in suggestions items: rationale (string), steps (array of strings).\n"
              "Instructions:\n"
              "- Interpret Git status codes (see legend), but if there is recent command output with errors/hints/pending steps — PRIORITIZE analyzing that output."
              " Provide solutions and warnings based on the actual messages.\n"
@@ -473,6 +480,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
              "  summary: string,\n"
              "  risks: array of strings,\n"
              "  suggestions: array of { title: string, commands: array of strings, keys: array of strings }\n"
+             "You MAY include optional fields in suggestions items: rationale (string), steps (array of strings).\n"
              "Answer STRICTLY in %s for textual fields.\n"
              "%s"
              "\n--- STATUS -sb ---\n%s\n"
@@ -532,6 +540,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
              "Explain the current branches: which are current, tracking, ahead/behind, stale, or can be cleaned up.\n"
              "Suggest safe actions (switch, create, delete merged, set upstream, fetch/prune, rename).\n"
              "Return ONLY JSON with fields: summary, risks[], suggestions[].{title,commands[],keys[]}.\n"
+             "You MAY include optional fields in suggestions items: rationale (string), steps (array of strings).\n"
              "Answer STRICTLY in %s.\n"
              "%s"
              "\n--- BRANCHES -vv ---\n%s\n"
@@ -601,9 +610,12 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
              "\n--- RECENT FILE HISTORY ---\n%s\n")
             ilang keys-block path rev log)))
 
-(defun magpt--render-restore-file-suggest (json _data)
+(defun magpt--render-restore-file-suggest (json data)
   (magpt--history-append-entry 'restore-file-suggest (or magpt--current-request "") (or json "")
-                               "JSON: {summary, risks[], suggestions[]}"))
+                               "JSON: {summary, risks[], suggestions[]}"
+                               :target-path (plist-get data :path)
+                               :target-rev  (plist-get data :rev))
+  )
 
 ;;;###autoload
 (defun magpt-restore-file-suggest (&optional path rev)

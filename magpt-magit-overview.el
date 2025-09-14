@@ -16,6 +16,7 @@
 (require 'json)
 (require 'magit nil t)
 (require 'magpt-apply nil t)
+(require 'magpt-history nil t)
 
 (defcustom magpt-magit-overview-enabled t
   "If non-nil, insert a compact 'AI overview (magpt)' section into magit-status."
@@ -156,6 +157,9 @@ history changes (no need for the user to press \"g\")."
     (magit-insert-section (magit-section 'magpt-ai-overview)
       ;; Parent heading: only this line is highlighted by Magit.
       (magit-insert-heading "AI overview (magpt)")
+      (when (fboundp 'magpt--log)
+        (magpt--log "overview: insert begin; entries=%d"
+                    (length (or (and (boundp 'magpt--history-entries) magpt--history-entries) '()))))
       (let* ((ex (magpt--history-last-entry-for 'explain-status))
              (cl (magpt--history-last-entry-for 'commit-lint-suggest))
              (bn (magpt--history-last-entry-for 'branch-name-suggest))

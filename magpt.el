@@ -29,6 +29,12 @@
 
 ;;; Code:
 
+;; Ensure local requires work when loading this file directly via load-file.
+(eval-and-compile
+  (let ((dir (file-name-directory (or load-file-name buffer-file-name))))
+    (when (and dir (file-directory-p dir))
+      (add-to-list 'load-path dir))))
+
 ;;;; Section: Dependencies and forward declarations
 ;;
 ;; We keep core deps lightweight. Magit/transient are optional. gptel is required for requests.

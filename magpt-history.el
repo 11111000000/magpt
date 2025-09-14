@@ -57,6 +57,9 @@ Extra KV pairs can be provided in KVS to extend the stored plist."
     ;; Extend entry with any extra kvs (e.g., :status-snapshot).
     (when kvs (setq entry (append entry kvs)))
     (push entry magpt--history-entries)
+    (when (fboundp 'magpt--log)
+      (magpt--log "history: append task=%s valid=%s note=%s total=%d"
+                  task (if json-valid "t" "nil") (or note "") (length magpt--history-entries)))
     ;; Trim history if needed.
     (when (and (integerp magpt-history-max-entries)
                (> magpt-history-max-entries 0)
@@ -64,6 +67,10 @@ Extra KV pairs can be provided in KVS to extend the stored plist."
       (setcdr (nthcdr (1- magpt-history-max-entries) magpt--history-entries) nil))
     ;; Fire notification hook if defined in parent.
     (when (boundp 'magpt-history-changed-hook)
+      (when (fboundp 'magpt--log)
+        (magpt--log "history: run-changed-hook fns=%d"
+                    (length (and (boundp 'magpt-history-changed-hook)
+                                 (symbol-value 'magpt-history-changed-hook)))))
       (run-hooks 'magpt-history-changed-hook))))
 
 (defun magpt--history-tasks ()
@@ -72,8 +79,9 @@ Extra KV pairs can be provided in KVS to extend the stored plist."
 
 (defun magpt--history-last-entry-for (task)
   "Return the most recent history entry plist for TASK, or nil if none."
-  (seq-find (lambda (e) (eq (plist-get e :task) task))
-            magpt--history-entries))
+  (let ((lst (and (boundp 'magpt--history-entries) magpt--history-entries)))
+    (seq-find (lambda (e) (eq (plist-get e :task) task))
+              lst)))
 
 (provide 'magpt-history)
 

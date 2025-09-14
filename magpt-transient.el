@@ -16,6 +16,10 @@
 (require 'seq)
 (require 'magit nil t)
 (require 'transient nil t)
+(require 'magpt-history nil t)
+(defvar transient--prefix)
+(defvar magpt-log-enabled nil)
+(declare-function magpt--log "ext:magpt" (fmt &rest args))
 
 ;; Forward declarations (silence byte-compiler; implementations in other modules).
 (declare-function magpt-commit-staged "ext:magpt")
@@ -214,12 +218,26 @@ Relies on newest-first ordering of `magpt--history-entries'."
 (defun magpt-ai-actions-reload ()
   "Reload AI actions state from the overview and refresh transient UI."
   (interactive)
-  (magpt--ai-actions-init)
+  (let ((n (magpt--ai-actions-init)))
+    (when (fboundp 'magpt--log)
+      (magpt--log "ai-actions-reload: suggestions=%d" n)))
   (when (featurep 'transient)
-    (transient-setup 'magpt-ai-actions))
+    (condition-case err
+        (progn
+          (when (fboundp 'magpt--log)
+            (magpt--log "ai-actions-reload: calling magpt-ai-actions interactively"))
+          (call-interactively #'magpt-ai-actions)
+          (when (fboundp 'magpt--log)
+            (magpt--log "ai-actions-reload: magpt-ai-actions OK")))
+      (error
+       (when (fboundp 'magpt--log)
+         (magpt--log "ai-actions-reload: interactive magpt-ai-actions error: %s"
+                     (error-message-string err))))))
   (message "magpt: AI actions reloaded from overview"))
 
-(when (featurep 'transient)
+(with-eval-after-load 'transient
+  (when (fboundp 'magpt--log)
+    (magpt--log "transient: defining magpt-ai-actions prefix"))
   (transient-define-prefix magpt-ai-actions ()
     "AI actions (magpt)"
     [["Suggestions"
@@ -238,20 +256,45 @@ Relies on newest-first ordering of `magpt--history-entries'."
   (defun magpt-ai-actions ()
     "Fallback AI actions when `transient' is not available."
     (interactive)
-    (magpt--ai-actions-init)
-    (call-interactively #'magpt-ai-actions-preview)))
+    (let ((n (magpt--ai-actions-init)))
+      (when (fboundp 'magpt--log)
+        (magpt--log "ai-actions(fallback): init suggestions=%d summary?=%s"
+                    n (if (and (stringp magpt--ai-actions-summary)
+                               (> (length magpt--ai-actions-summary) 0)) "t" "nil")))
+      (condition-case err
+          (call-interactively #'magpt-ai-actions-preview)
+        (error
+         (when (fboundp 'magpt--log)
+           (magpt--log "ai-actions(fallback): preview error: %s" (error-message-string err)))
+         (signal (car err) (cdr err)))))))
 
 (unless (fboundp 'magpt-ai-actions-entry)
   (defun magpt-ai-actions-entry ()
     "Entry point for '.' key in Magit; logs and opens AI actions."
     (interactive)
     (when (fboundp 'magpt--log)
-      (magpt--log "key [.]: magpt-ai-actions-entry buffer=%s root=%s"
+      (magpt--log "key [.]: magpt-ai-actions-entry buffer=%s root=%s transient?=%s"
                   (buffer-name)
-                  (ignore-errors (magpt--project-root))))
+                  (ignore-errors (magpt--project-root))
+                  (if (featurep 'transient) "t" "nil")))
     (if (featurep 'transient)
-        (transient-setup 'magpt-ai-actions)
-      (magpt-ai-actions))))
+        (condition-case err
+            (progn
+              (when (fboundp 'magpt--log)
+                (magpt--log "ai-actions-entry: calling magpt-ai-actions interactively"))
+              (call-interactively #'magpt-ai-actions)
+              (when (fboundp 'magpt--log)
+                (magpt--log "ai-actions-entry: interactive magpt-ai-actions OK")))
+          (error
+           (when (fboundp 'magpt--log)
+             (magpt--log "ai-actions-entry: interactive magpt-ai-actions error: %s; fallback to text UI"
+                         (error-message-string err)))
+           ;; Fallback to non-transient UI if Transient is not ready.
+           (magpt-ai-actions)))
+      (progn
+        (when (fboundp 'magpt--log)
+          (magpt--log "ai-actions-entry: transient not present; using fallback UI"))
+        (magpt-ai-actions)))))
 
 (provide 'magpt-transient)
 

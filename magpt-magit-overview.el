@@ -182,6 +182,7 @@ history changes (no need for the user to press \"g\")."
              (rc (magpt--history-last-entry-for 'resolve-conflict-here))
              (pp (magpt--history-last-entry-for 'explain-push-pull))
              (br (magpt--history-last-entry-for 'explain-branches))
+             (rs (magpt--history-last-entry-for 'reset-files-suggest))
              (rf (magpt--history-last-entry-for 'restore-file-suggest)))
         (if (not ex)
             (progn
@@ -453,6 +454,46 @@ history changes (no need for the user to press \"g\")."
                       (insert (string-trim-right (plist-get br :response)) "\n\n")))
                   (when (fboundp 'magpt--insert-entry-buttons)
                     (magpt--insert-entry-buttons br)))))
+            ;; Child card: Reset files (how-to)
+            (when rs
+              (magit-insert-section (magit-section 'magpt-ai-card-reset-files)
+                (magit-insert-heading (magpt--i18n 'overview-card-reset-files))
+                (let ((magpt-ui-density 'compact))
+                  (let ((data (and (plist-get rs :valid) (magpt--entry-parse-json-safe rs))))
+                    (if data
+                        (let* ((summary (alist-get 'summary data))
+                               (sugs (or (alist-get 'suggestions data) '()))
+                               (first (car sugs))
+                               (cmds (and first (alist-get 'commands first)))
+                               (cmd (and (listp cmds) (car cmds))))
+                          (when (stringp summary)
+                            (dolist (ln (split-string (string-trim-right summary) "\n"))
+                              (insert "  " ln "\n")))
+                          (when (stringp cmd)
+                            (insert "\n")
+                            (insert (format "      $ %s\n" cmd))
+                            (insert "      ")
+                            (insert-text-button "[Eshell]"
+                                                'action #'magpt--btn-eshell-insert
+                                                'follow-link t
+                                                'help-echo "Insert command into eshell (bottom popup)"
+                                                'magpt-command cmd)
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (st steps)
+                                  (insert "        - " (format "%s" st) "\n"))))))
+                      (insert (magpt--i18n 'overview-response) "\n")
+                      (insert (string-trim-right (plist-get rs :response)) "\n\n")))
+                  (when (fboundp 'magpt--insert-entry-buttons)
+                    (magpt--insert-entry-buttons rs)))))
             ;; Child card: Recover file (how-to)
             (when rf
               (magit-insert-section (magit-section 'magpt-ai-card-restore-file)

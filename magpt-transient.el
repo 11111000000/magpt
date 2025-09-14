@@ -29,6 +29,12 @@
 (declare-function magpt-explain-push-pull "magpt-tasks-assist" ())
 (declare-function magpt-explain-branches "magpt-tasks-assist" ())
 (declare-function magpt-restore-file-suggest "magpt-tasks-assist" ())
+(declare-function magpt-reset-files-suggest "magpt-tasks-assist" ())
+(declare-function magpt-explain-undo-commits "magpt-tasks-assist" ())
+(declare-function magpt-explain-reflog-rescue "magpt-tasks-assist" ())
+(declare-function magpt-explain-stash "magpt-tasks-assist" ())
+(declare-function magpt-explain-detached-head "magpt-tasks-assist" ())
+(declare-function magpt-explain-set-upstream "magpt-tasks-assist" ())
 (declare-function magpt--eshell-popup-insert "magpt-apply" (cmd))
 ;; History API
 (declare-function magpt--history-last-entry-for "magpt-history" (task))
@@ -114,13 +120,28 @@
   "Summary string from the last explain-status, if available.")
 
 (defcustom magpt-ai-actions-source-tasks
-  '(explain-status explain-push-pull explain-branches restore-file-suggest)
+  '(explain-status
+    explain-push-pull
+    explain-branches
+    restore-file-suggest
+    reset-files-suggest
+    explain-undo-commits
+    explain-reflog-rescue
+    explain-stash
+    explain-detached-head
+    explain-set-upstream)
   "Tasks to source suggestions from for AI Actions.
 The newest valid entry among these tasks supplies summary and suggestions."
   :type '(repeat (choice (const explain-status)
                          (const explain-push-pull)
                          (const explain-branches)
-                         (const restore-file-suggest)))
+                         (const restore-file-suggest)
+                         (const reset-files-suggest)
+                         (const explain-undo-commits)
+                         (const explain-reflog-rescue)
+                         (const explain-stash)
+                         (const explain-detached-head)
+                         (const explain-set-upstream)))
   :group 'magpt)
 
 (defun magpt--ai--normalize-suggestions (data)
@@ -298,6 +319,12 @@ When the AI Actions transient is open, the UI is also reloaded."
       ("u" "Push/Pull advice" magpt-explain-push-pull)
       ("b" "Explain branches" magpt-explain-branches)
       ("f" "Recover file..." magpt-restore-file-suggest)
+      ("x" "Reset files (how-to)" magpt-reset-files-suggest)
+      ("o" "Undo commits (reset vs revert)" magpt-explain-undo-commits)
+      ("L" "Reflog rescue" magpt-explain-reflog-rescue)
+      ("t" "Stash guide" magpt-explain-stash)
+      ("D" "Detached HEAD help" magpt-explain-detached-head)
+      ("S" "Set upstream help" magpt-explain-set-upstream)
       ("r" "Reload from overview" magpt-ai-actions-reload)]]))
 
 (unless (fboundp 'magpt-ai-actions)

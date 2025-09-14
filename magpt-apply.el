@@ -455,6 +455,20 @@ Offers stashing unstaged changes first (stash -k) if restoring to worktree."
                              'action #'magpt--btn-restore-file-apply
                              'follow-link t
                              'help-echo "git restore --source REV (worktree/index)"
+                             'magpt-entry entry)))
+      ('reset-files-suggest
+       (insert "  ")
+       (insert-text-button "[Preview file@rev]"
+                           'action #'magpt--btn-restore-file-preview
+                           'follow-link t
+                           'help-echo "Show diff or blob for selected revision"
+                           'magpt-entry entry)
+       (when magpt-allow-apply-safe-ops
+         (insert "  ")
+         (insert-text-button "[Restore...]"
+                             'action #'magpt--btn-restore-file-apply
+                             'follow-link t
+                             'help-echo "git restore --source REV (worktree/index)"
                              'magpt-entry entry))))
     (insert "\n")
     (put-text-property start (point) 'read-only t)))

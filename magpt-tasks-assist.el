@@ -690,6 +690,66 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                   :render-fn  #'magpt--render-restore-file-suggest
                   :apply-fn   nil
                   :confirm-send? t))
+    ;; Reset files (how-to)
+    (magpt-register-task
+     (magpt--task :name 'reset-files-suggest
+                  :title "Reset files (how-to)"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-reset-files-suggest
+                  :prompt-fn  #'magpt--prompt-reset-files-suggest
+                  :render-fn  #'magpt--render-reset-files-suggest
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Undo commits (reset vs revert)
+    (magpt-register-task
+     (magpt--task :name 'explain-undo-commits
+                  :title "Undo commits (reset vs revert)"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-undo-commits
+                  :prompt-fn  #'magpt--prompt-undo-commits
+                  :render-fn  #'magpt--render-undo-commits
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Reflog rescue
+    (magpt-register-task
+     (magpt--task :name 'explain-reflog-rescue
+                  :title "Reflog rescue"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-reflog-rescue
+                  :prompt-fn  #'magpt--prompt-reflog-rescue
+                  :render-fn  #'magpt--render-reflog-rescue
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Stash guide
+    (magpt-register-task
+     (magpt--task :name 'explain-stash
+                  :title "Stash guide"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-stash
+                  :prompt-fn  #'magpt--prompt-stash
+                  :render-fn  #'magpt--render-stash
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Detached HEAD
+    (magpt-register-task
+     (magpt--task :name 'explain-detached-head
+                  :title "Detached HEAD help"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-detached-head
+                  :prompt-fn  #'magpt--prompt-detached-head
+                  :render-fn  #'magpt--render-detached-head
+                  :apply-fn   nil
+                  :confirm-send? t))
+    ;; Set upstream
+    (magpt-register-task
+     (magpt--task :name 'explain-set-upstream
+                  :title "Set upstream help"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-set-upstream
+                  :prompt-fn  #'magpt--prompt-set-upstream
+                  :render-fn  #'magpt--render-set-upstream
+                  :apply-fn   nil
+                  :confirm-send? t))
     (setq magpt--assist-tasks-registered t)))
 
 (defun magpt--ensure-assist-ready ()
@@ -757,6 +817,324 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (interactive)
   (magpt--ensure-assist-ready)
   (magpt-run-task 'branch-name-suggest))
+
+;; P2: Reset files (how-to)
+
+(defun magpt--ctx-reset-files-suggest (_ctx)
+  "Collect context to explain restoring/resetting files safely."
+  (let* ((root (magpt--project-root))
+         (porc (ignore-errors (magpt--git root "status" "--porcelain")))
+         (parsed (and porc (magpt--porcelain-parse porc)))
+         (staged (and parsed (plist-get parsed :staged)))
+         (unstaged (and parsed (plist-get parsed :unstaged)))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (when porc (format "STATUS (porcelain):\n%s"
+                                             (string-join (seq-take (split-string porc "\n" t) 200) "\n")))
+                          (and keys (> (length keys) 0)
+                               (format "\n\nMAGIT KEYS:\n%s"
+                                       (string-join (seq-take (split-string keys "\n" t) 50) "\n")))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :porcelain porc :staged staged :unstaged unstaged :magit-keys keys)
+          preview bytes)))
+
+(defun magpt--prompt-reset-files-suggest (data)
+  "Prompt to explain git restore/checkout/reset differences at path level."
+  (let* ((ilang (or magpt-info-language "English"))
+         (porc (or (plist-get data :porcelain) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "I need to reset or recover files safely. Explain when to use:\n"
+             "- git restore --source=REV -- <path> (worktree and/or index),\n"
+             "- legacy git checkout REV -- <path> (compat only),\n"
+             "- git reset {--soft|--mixed|--hard} [-- <path>] and its risks.\n"
+             "Provide warnings about overwriting staged/unstaged changes and how to make a backup (stash -k).\n"
+             "Return ONLY JSON: summary, risks[], suggestions[].{title,commands[],keys[]}. Optional: rationale, steps[].\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- STATUS (porcelain) ---\n%s\n")
+            ilang keys-block porc)))
+
+(defun magpt--render-reset-files-suggest (json _data)
+  (magpt--history-append-entry 'reset-files-suggest (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[].commands[]}"))
+
+;;;###autoload
+(defun magpt-reset-files-suggest ()
+  "Run the 'Reset files (how-to)' assist task (read-only)."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'reset-files-suggest))
+
+;; P2: Undo commits (reset vs revert)
+
+(defun magpt--ctx-undo-commits (_ctx)
+  "Collect ahead/behind and short log context."
+  (let* ((root (magpt--project-root))
+         (status (ignore-errors (magpt--git root "status" "-sb")))
+         (upstream (ignore-errors (magpt--git root "rev-parse" "--abbrev-ref" "@{upstream}")))
+         (lr (and upstream (ignore-errors (magpt--git root "rev-list" "--left-right" "--count" "@{upstream}...HEAD"))))
+         (log (ignore-errors (magpt--git root "log" "--oneline" "-n" "15")))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (and status (format "STATUS -sb:\n%s" status))
+                          (and upstream (format "\nUPSTREAM: %s" upstream))
+                          (and lr (format "\nAHEAD/BEHIND: %s" lr))
+                          (and log (format "\n\nRECENT LOG:\n%s" log))
+                          (and keys (> (length keys) 0)
+                               (format "\n\nMAGIT KEYS:\n%s"
+                                       (string-join (seq-take (split-string keys "\n" t) 50) "\n")))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :status status :upstream upstream :ahead-behind lr :log log :magit-keys keys)
+          preview bytes)))
+
+(defun magpt--prompt-undo-commits (data)
+  "Prompt to explain reset vs revert for undoing commits."
+  (let* ((ilang (or magpt-info-language "English"))
+         (status (or (plist-get data :status) ""))
+         (up (or (plist-get data :upstream) "(none)"))
+         (lr (or (plist-get data :ahead-behind) "(0 0)"))
+         (log (or (plist-get data :log) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "Explain safe ways to undo commits: when to use git reset (soft/mixed/hard) vs git revert.\n"
+             "Consider whether the branch is pushed/shared, and warn about rewriting history.\n"
+             "Return ONLY JSON: summary, risks[], suggestions[].{title,commands[],keys[]} (optional: rationale, steps[]).\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- STATUS -sb ---\n%s\n--- UPSTREAM ---\n%s\n--- AHEAD/BEHIND ---\n%s\n--- LOG ---\n%s\n")
+            ilang keys-block status up lr log)))
+
+(defun magpt--render-undo-commits (json _data)
+  (magpt--history-append-entry 'explain-undo-commits (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[]}"))
+
+;;;###autoload
+(defun magpt-explain-undo-commits ()
+  "Run 'Undo commits (reset vs revert)' assist task."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'explain-undo-commits))
+
+;; P2: Reflog rescue
+
+(defun magpt--ctx-reflog-rescue (_ctx)
+  "Collect short reflog for rescue scenarios."
+  (let* ((root (magpt--project-root))
+         (reflog (ignore-errors (magpt--git root "reflog" "show" "--date=short" "--format=%h %gd %gs" "-n" "20")))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (and reflog (format "REFLOG (20):\n%s" reflog))
+                          (and keys (> (length keys) 0))
+                          (and keys (format "\n\nMAGIT KEYS:\n%s"
+                                            (string-join (seq-take (split-string keys "\n" t) 50) "\n")))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :reflog reflog :magit-keys keys) preview bytes)))
+
+(defun magpt--prompt-reflog-rescue (data)
+  "Prompt for rescuing lost work via reflog."
+  (let* ((ilang (or magpt-info-language "English"))
+         (reflog (or (plist-get data :reflog) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "Explain how to find and recover lost commits/branches using reflog.\n"
+             "Return ONLY JSON: summary, risks[], suggestions[].{title,commands[],keys[]} (optional: rationale, steps[]).\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- REFLOG ---\n%s\n")
+            ilang keys-block reflog)))
+
+(defun magpt--render-reflog-rescue (json _data)
+  (magpt--history-append-entry 'explain-reflog-rescue (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[]}"))
+
+;;;###autoload
+(defun magpt-explain-reflog-rescue ()
+  "Run 'Reflog rescue' assist task."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'explain-reflog-rescue))
+
+;; P2: Stash guide
+
+(defun magpt--ctx-stash (_ctx)
+  "Collect stash list and brief status."
+  (let* ((root (magpt--project-root))
+         (status (ignore-errors (magpt--git root "status" "--porcelain")))
+         (stash (ignore-errors (magpt--git root "stash" "list")))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (and status (format "STATUS (porcelain):\n%s" status))
+                          (and stash (format "\n\nSTASH LIST:\n%s" stash))
+                          (and keys (> (length keys) 0)
+                               (format "\n\nMAGIT KEYS:\n%s"
+                                       (string-join (seq-take (split-string keys "\n" t) 50) "\n")))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :status status :stash stash :magit-keys keys) preview bytes)))
+
+(defun magpt--prompt-stash (data)
+  "Prompt to explain stash use cases and pitfalls."
+  (let* ((ilang (or magpt-info-language "English"))
+         (status (or (plist-get data :status) ""))
+         (stash (or (plist-get data :stash) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "Explain how to use git stash (push/apply/pop/branch), partial apply, and handle conflicts.\n"
+             "Return ONLY JSON: summary, risks[], suggestions[].{title,commands[],keys[]} (optional: rationale, steps[]).\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- STATUS ---\n%s\n--- STASH LIST ---\n%s\n")
+            ilang keys-block status stash)))
+
+(defun magpt--render-stash (json _data)
+  (magpt--history-append-entry 'explain-stash (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[]}"))
+
+;;;###autoload
+(defun magpt-explain-stash ()
+  "Run 'Stash guide' assist task."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'explain-stash))
+
+;; P2: Detached HEAD
+
+(defun magpt--ctx-detached-head (_ctx)
+  "Collect info about HEAD state and recent commits."
+  (let* ((root (magpt--project-root))
+         (branch (ignore-errors (magpt--git root "rev-parse" "--abbrev-ref" "HEAD")))
+         (show (ignore-errors (magpt--git root "show" "-s" "--format=%h %s" "HEAD")))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (format "HEAD BRANCH: %s" (or branch "unknown"))
+                          (and show (format "\nLAST COMMIT:\n%s" show))
+                          (and keys (> (length keys) 0)
+                               (format "\n\nMAGIT KEYS:\n%s"
+                                       (string-join (seq-take (split-string keys "\n" t) 50) "\n")))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :branch branch :last show :magit-keys keys) preview bytes)))
+
+(defun magpt--prompt-detached-head (data)
+  "Prompt to explain detached HEAD and safe ways to proceed."
+  (let* ((ilang (or magpt-info-language "English"))
+         (branch (or (plist-get data :branch) ""))
+         (last (or (plist-get data :last) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "Explain detached HEAD state, how to get back to a branch or create a new one from current commit.\n"
+             "Return ONLY JSON: summary, risks[], suggestions[].{title,commands[],keys[]} (optional: rationale, steps[]).\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- BRANCH ---\n%s\n--- LAST COMMIT ---\n%s\n")
+            ilang keys-block branch last)))
+
+(defun magpt--render-detached-head (json _data)
+  (magpt--history-append-entry 'explain-detached-head (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[]}"))
+
+;;;###autoload
+(defun magpt-explain-detached-head ()
+  "Run 'Detached HEAD help' assist task."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'explain-detached-head))
+
+;; P2: Set upstream
+
+(defun magpt--ctx-set-upstream (_ctx)
+  "Collect info to explain setting upstream for current branch."
+  (let* ((root (magpt--project-root))
+         (status (ignore-errors (magpt--git root "status" "-sb")))
+         (branch (ignore-errors (magpt--git root "rev-parse" "--abbrev-ref" "HEAD")))
+         (upstream (ignore-errors (magpt--git root "rev-parse" "--abbrev-ref" "@{upstream}")))
+         (remote (ignore-errors (magpt--git root "remote" "-v")))
+         (keys (when magpt-include-magit-keys-in-suggestions
+                 (magpt--format-magit-keys-cheatsheet-safe)))
+         (preview (string-join
+                   (delq nil
+                         (list
+                          (and status (format "STATUS -sb:\n%s" status))
+                          (and branch (format "\nBRANCH: %s" branch))
+                          (and upstream (format "\nUPSTREAM: %s" upstream))
+                          (and remote (format "\n\nREMOTES:\n%s" remote))
+                          (and keys (> (length keys) 0)
+                               (format "\n\nMAGIT KEYS:\n%s"
+                                       (string-join (seq-take (split-string keys "\n" t) 50) "\n")))))
+                   ""))
+         (bytes (magpt--string-bytes preview)))
+    (list (list :status status :branch branch :upstream upstream :remote remote :magit-keys keys)
+          preview bytes)))
+
+(defun magpt--prompt-set-upstream (data)
+  "Prompt to explain setting upstream for current branch."
+  (let* ((ilang (or magpt-info-language "English"))
+         (status (or (plist-get data :status) ""))
+         (branch (or (plist-get data :branch) ""))
+         (up (or (plist-get data :upstream) "(none)"))
+         (remote (or (plist-get data :remote) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below for suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "Explain how to set upstream for the current branch and implications for push/pull.\n"
+             "Return ONLY JSON: summary, risks[], suggestions[].{title,commands[],keys[]} (optional: rationale, steps[]).\n"
+             "Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- STATUS -sb ---\n%s\n--- BRANCH ---\n%s\n--- UPSTREAM ---\n%s\n--- REMOTES ---\n%s\n")
+            ilang keys-block status branch up remote)))
+
+(defun magpt--render-set-upstream (json _data)
+  (magpt--history-append-entry 'explain-set-upstream (or magpt--current-request "") (or json "")
+                               "JSON: {summary, risks[], suggestions[]}"))
+
+;;;###autoload
+(defun magpt-explain-set-upstream ()
+  "Run 'Set upstream help' assist task."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (magpt-run-task 'explain-set-upstream))
 
 (provide 'magpt-tasks-assist)
 

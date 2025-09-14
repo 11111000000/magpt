@@ -17,7 +17,7 @@
 (require 'magit nil t)
 (require 'transient nil t)
 (require 'magpt-history nil t)
-(defvar transient--prefix)
+;; transient--prefix is defined by Transient; don't bind it here to avoid unbinding on unload.
 (defvar magpt-log-enabled nil)
 (declare-function magpt--log "ext:magpt" (fmt &rest args))
 
@@ -36,6 +36,7 @@
 (declare-function magpt-explain-detached-head "magpt-tasks-assist" ())
 (declare-function magpt-explain-set-upstream "magpt-tasks-assist" ())
 (declare-function magpt--eshell-popup-insert "magpt-apply" (cmd))
+(declare-function magpt--i18n "ext:magpt" (key &rest args))
 ;; History API
 (declare-function magpt--history-last-entry-for "magpt-history" (task))
 (declare-function magpt--entry-parse-json-safe "magpt-history" (entry))
@@ -47,8 +48,34 @@
   :group 'magpt)
 
 (defun magpt--transient-desc (s)
-  "Return S; kept for future styling hooks."
-  s)
+  "Return S translated according to `magpt-info-language' (basic Russian support)."
+  (let* ((lang (and (boundp 'magpt-info-language) magpt-info-language))
+         (ru (and (stringp lang)
+                  (string-match-p "\\`\\(ru\\|russian\\)" (downcase lang))))
+         (table
+          '(("AI actions (magpt)" . "Действия ИИ (magpt)")
+            ("Commit with AI message (magpt)" . "Коммит с сообщением ИИ (magpt)")
+            ("Suggestions" . "Подсказки")
+            ("Overview/Tasks" . "Обзор/Задачи")
+            ("Preview suggestion..." . "Просмотр подсказки...")
+            ("Copy suggestion..." . "Копировать подсказку...")
+            ("Insert first command into eshell" . "Вставить первую команду в eshell")
+            ("Copy summary" . "Копировать сводку")
+            ("Commit with AI message" . "Коммит с сообщением ИИ")
+            ("Get new recommendations (Explain Status)" . "Получить рекомендации (Explain Status)")
+            ("Push/Pull advice" . "Советы по push/pull")
+            ("Explain branches" . "Объяснить ветки")
+            ("Recover file..." . "Восстановить файл...")
+            ("Reset files (how-to)" . "Сброс файлов (инструкции)")
+            ("Undo commits (reset vs revert)" . "Отменить коммиты (reset vs revert)")
+            ("Reflog rescue" . "Спасение через reflog")
+            ("Stash guide" . "Руководство по stash")
+            ("Detached HEAD help" . "Помощь по Detached HEAD")
+            ("Set upstream help" . "Настроить upstream")
+            ("Reload from overview" . "Обновить из обзора"))))
+    (if ru
+        (or (cdr (assoc s table)) s)
+      s)))
 
 ;; Safe helpers to integrate with Transient across versions (avoid hard failures).
 (defun magpt--transient-append-suffix-safe (parent pos spec)
@@ -191,7 +218,7 @@ Relies on newest-first ordering of `magpt--history-entries'."
   (unless magpt--ai-actions-suggestions (magpt--ai-actions-init))
   (let* ((titles (mapcar (lambda (it) (plist-get it :title))
                          magpt--ai-actions-suggestions))
-         (choice (completing-read "Suggestion: " titles nil t)))
+         (choice (completing-read (magpt--i18n 'ai-suggest-prompt) titles nil t)))
     (cl-position choice titles :test #'string=)))
 
 (defun magpt-ai-actions-preview (&optional idx)
@@ -199,7 +226,7 @@ Relies on newest-first ordering of `magpt--history-entries'."
   (interactive)
   (magpt--ai-actions-init)
   (if (zerop (length magpt--ai-actions-suggestions))
-      (user-error "No suggestions found; run [. g], or u/b/f")
+      (user-error "%s" (magpt--i18n 'ai-no-suggestions))
     (let* ((i (or idx (magpt--ai-actions-choose-index)))
            (sug (nth i magpt--ai-actions-suggestions))
            (title (plist-get sug :title))
@@ -219,19 +246,19 @@ Relies on newest-first ordering of `magpt--history-entries'."
   (interactive)
   (magpt--ai-actions-init)
   (if (zerop (length magpt--ai-actions-suggestions))
-      (user-error "No suggestions found; run [. g], or u/b/f")
+      (user-error "%s" (magpt--i18n 'ai-no-suggestions))
     (let* ((i (or idx (magpt--ai-actions-choose-index)))
            (sug (nth i magpt--ai-actions-suggestions))
            (cmds (plist-get sug :commands)))
       (kill-new cmds)
-      (message "magpt: suggestion commands copied"))))
+      (message "%s" (magpt--i18n 'ai-suggest-copied)))))
 
 (defun magpt-ai-actions-eshell-insert (&optional idx)
   "Insert the first command of a suggestion into an eshell popup."
   (interactive)
   (magpt--ai-actions-init)
   (if (zerop (length magpt--ai-actions-suggestions))
-      (user-error "No suggestions found; run [. g], or u/b/f")
+      (user-error "%s" (magpt--i18n 'ai-no-suggestions))
     (let* ((i (or idx (magpt--ai-actions-choose-index)))
            (sug (nth i magpt--ai-actions-suggestions))
            (cmds (plist-get sug :commands))
@@ -242,12 +269,12 @@ Relies on newest-first ordering of `magpt--history-entries'."
                                               (not (string-prefix-p "#" (string-trim-left l))))))
                        lines))))
     (unless (stringp first)
-      (user-error "No shell command found in this suggestion"))
+      (user-error "%s" (magpt--i18n 'ai-no-shell-cmd)))
     (unless (fboundp 'magpt--eshell-popup-insert)
       (require 'magpt-apply nil t))
     (if (fboundp 'magpt--eshell-popup-insert)
         (magpt--eshell-popup-insert (string-trim first))
-      (user-error "magpt: eshell helper not available (magpt-apply not loaded)"))))
+      (user-error "%s" (magpt--i18n 'ai-eshell-helper-missing)))))
 
 (defun magpt-ai-actions-copy-summary ()
   "Copy the latest summary to the kill-ring."
@@ -256,9 +283,9 @@ Relies on newest-first ordering of `magpt--history-entries'."
     (magpt--ai-actions-init))
   (if (not (and (stringp magpt--ai-actions-summary)
                 (> (length magpt--ai-actions-summary) 0)))
-      (user-error "No summary available; run [. g], or u/b/f")
+      (user-error "%s" (magpt--i18n 'ai-no-summary))
     (kill-new magpt--ai-actions-summary)
-    (message "magpt: summary copied")))
+    (message "%s" (magpt--i18n 'ai-summary-copied))))
 
 (defun magpt-ai-actions-reload ()
   "Reload AI actions state from the overview and refresh transient UI."
@@ -278,7 +305,7 @@ Relies on newest-first ordering of `magpt--history-entries'."
        (when (fboundp 'magpt--log)
          (magpt--log "ai-actions-reload: interactive magpt-ai-actions error: %s"
                      (error-message-string err))))))
-  (message "magpt: AI actions reloaded from overview"))
+  (message "%s" (magpt--i18n 'ai-actions-reloaded)))
 
 (defcustom magpt-ai-actions-auto-reload t
   "If non-nil, automatically refresh AI Actions suggestions when history changes.
@@ -309,23 +336,39 @@ When the AI Actions transient is open, the UI is also reloaded."
   (transient-define-prefix magpt-ai-actions ()
     "AI actions (magpt)"
     [["Suggestions"
-      ("p" "Preview suggestion..." magpt-ai-actions-preview)
-      ("y" "Copy suggestion..." magpt-ai-actions-copy)
-      ("e" "Insert first command into eshell" magpt-ai-actions-eshell-insert)
-      ("s" "Copy summary" magpt-ai-actions-copy-summary)
-      ("c" "Commit with AI message" magpt-commit-staged)]
+      ("p" magpt-ai-actions-preview
+       :description (lambda () (magpt--transient-desc "Preview suggestion...")))
+      ("y" magpt-ai-actions-copy
+       :description (lambda () (magpt--transient-desc "Copy suggestion...")))
+      ("e" magpt-ai-actions-eshell-insert
+       :description (lambda () (magpt--transient-desc "Insert first command into eshell")))
+      ("s" magpt-ai-actions-copy-summary
+       :description (lambda () (magpt--transient-desc "Copy summary")))
+      ("c" magpt-commit-staged
+       :description (lambda () (magpt--transient-desc "Commit with AI message")))]
      ["Overview/Tasks"
-      ("g" "Get new recommendations (Explain Status)" magpt-explain-status)
-      ("u" "Push/Pull advice" magpt-explain-push-pull)
-      ("b" "Explain branches" magpt-explain-branches)
-      ("f" "Recover file..." magpt-restore-file-suggest)
-      ("x" "Reset files (how-to)" magpt-reset-files-suggest)
-      ("o" "Undo commits (reset vs revert)" magpt-explain-undo-commits)
-      ("L" "Reflog rescue" magpt-explain-reflog-rescue)
-      ("t" "Stash guide" magpt-explain-stash)
-      ("D" "Detached HEAD help" magpt-explain-detached-head)
-      ("S" "Set upstream help" magpt-explain-set-upstream)
-      ("r" "Reload from overview" magpt-ai-actions-reload)]]))
+      ("g" magpt-explain-status
+       :description (lambda () (magpt--transient-desc "Get new recommendations (Explain Status)")))
+      ("u" magpt-explain-push-pull
+       :description (lambda () (magpt--transient-desc "Push/Pull advice")))
+      ("b" magpt-explain-branches
+       :description (lambda () (magpt--transient-desc "Explain branches")))
+      ("f" magpt-restore-file-suggest
+       :description (lambda () (magpt--transient-desc "Recover file...")))
+      ("x" magpt-reset-files-suggest
+       :description (lambda () (magpt--transient-desc "Reset files (how-to)")))
+      ("o" magpt-explain-undo-commits
+       :description (lambda () (magpt--transient-desc "Undo commits (reset vs revert)")))
+      ("L" magpt-explain-reflog-rescue
+       :description (lambda () (magpt--transient-desc "Reflog rescue")))
+      ("t" magpt-explain-stash
+       :description (lambda () (magpt--transient-desc "Stash guide")))
+      ("D" magpt-explain-detached-head
+       :description (lambda () (magpt--transient-desc "Detached HEAD help")))
+      ("S" magpt-explain-set-upstream
+       :description (lambda () (magpt--transient-desc "Set upstream help")))
+      ("r" magpt-ai-actions-reload
+       :description (lambda () (magpt--transient-desc "Reload from overview")))]]))
 
 (unless (fboundp 'magpt-ai-actions)
   (defun magpt-ai-actions ()

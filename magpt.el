@@ -533,7 +533,8 @@ Use when transient/ui ломается после пересборки или ev
     (require 'magit nil t)
     (require 'transient nil t)
     ;; 5) Reload modules in dependency order
-    (dolist (feat '(magpt-history
+    (dolist (feat '(magpt-i18n
+                    magpt-history
                     magpt-ui-preview
                     magpt-git
                     magpt-gpt

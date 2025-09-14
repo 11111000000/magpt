@@ -268,7 +268,7 @@
     (when (fboundp 'eshell-kill-input)
       (ignore-errors (eshell-kill-input)))
     (insert (string-trim-right (or cmd "")))
-    (message "magpt: command inserted into eshell")))
+    (message "%s" (magpt--i18n 'ai-eshell-inserted))))
 
 (defun magpt--btn-eshell-insert (button)
   "Button action: insert the attached command into an eshell popup."

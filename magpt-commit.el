@@ -30,7 +30,6 @@
 
 (defvar magpt-model)
 (defvar gptel-model)
-(defvar transient--prefix)
 (declare-function transient-quit-all "ext:transient")
 
 (defcustom magpt-commit-overlay-text "Message generation..."

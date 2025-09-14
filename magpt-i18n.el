@@ -15,7 +15,7 @@
 
 (defun magpt--lang-code ()
   "Return language code symbol based on `magpt-info-language'."
-  (let* ((raw (or magpt-info-language "English"))
+  (let* ((raw (or (and (boundp 'magpt-info-language) magpt-info-language) "English"))
          (l (downcase raw)))
     (cond
      ;; Russian
@@ -78,7 +78,17 @@
     (overview-card-reset-files . "Reset files (how-to)")
     (overview-no-data . "(no data - press [. g] to refresh)")
     (overview-stale . "(status changed - press [. g] to refresh)")
-    (patch-opened . "Opened response in patch buffer")))
+    (patch-opened . "Opened response in patch buffer")
+    ;; Transient/AI Actions UI
+    (ai-suggest-prompt . "Suggestion: ")
+    (ai-suggest-copied . "magpt: suggestion commands copied")
+    (ai-summary-copied . "magpt: summary copied")
+    (ai-no-suggestions . "No suggestions found; run [. g], or u/b/f")
+    (ai-no-summary . "No summary available; run [. g], or u/b/f")
+    (ai-no-shell-cmd . "No shell command found in this suggestion")
+    (ai-eshell-helper-missing . "magpt: eshell helper not available (magpt-apply not loaded)")
+    (ai-eshell-inserted . "magpt: command inserted into eshell")
+    (ai-actions-reloaded . "magpt: AI actions reloaded from overview")))
 
 ;; Russian
 (defconst magpt--i18n-ru
@@ -121,7 +131,17 @@
     (overview-card-reset-files . "Сброс файлов (инструкция)")
     (overview-no-data . "(нет данных - нажмите [. g] для обновления)")
     (overview-stale . "(статус изменился - нажмите [. g] для обновления)")
-    (patch-opened . "Патч открыт в буфере")))
+    (patch-opened . "Патч открыт в буфере")
+    ;; Transient/AI Actions UI
+    (ai-suggest-prompt . "Подсказка: ")
+    (ai-suggest-copied . "magpt: команды подсказки скопированы")
+    (ai-summary-copied . "magpt: сводка скопирована")
+    (ai-no-suggestions . "Подсказки не найдены; выполните [. g] или u/b/f")
+    (ai-no-summary . "Сводка недоступна; выполните [. g] или u/b/f")
+    (ai-no-shell-cmd . "В этой подсказке нет команды оболочки")
+    (ai-eshell-helper-missing . "magpt: помощник eshell недоступен (magpt-apply не загружен)")
+    (ai-eshell-inserted . "magpt: команда вставлена в eshell")
+    (ai-actions-reloaded . "magpt: AI-действия обновлены из обзора")))
 
 ;; French (kept for compatibility)
 (defconst magpt--i18n-fr
@@ -161,7 +181,17 @@
     (overview-card-reset-files . "Réinitialiser des fichiers (guide)")
     (overview-no-data . "(aucune donnée — appuyez sur [. g] pour actualiser)")
     (overview-stale . "(état modifié — appuyez sur [. g] pour actualiser)")
-    (patch-opened . "Patch ouvert dans un tampon")))
+    (patch-opened . "Patch ouvert dans un tampon")
+    ;; Transient/AI Actions UI
+    (ai-suggest-prompt . "Suggestion : ")
+    (ai-suggest-copied . "magpt : commandes de la suggestion copiées")
+    (ai-summary-copied . "magpt : résumé copié")
+    (ai-no-suggestions . "Aucune suggestion trouvée ; lancez [. g], ou u/b/f")
+    (ai-no-summary . "Aucun résumé disponible ; lancez [. g], ou u/b/f")
+    (ai-no-shell-cmd . "Aucune commande shell trouvée dans cette suggestion")
+    (ai-eshell-helper-missing . "magpt : aide eshell non disponible (magpt-apply non chargé)")
+    (ai-eshell-inserted . "magpt : commande insérée dans eshell")
+    (ai-actions-reloaded . "magpt : actions IA rechargées depuis l’aperçu")))
 
 ;; Chinese (Simplified)
 (defconst magpt--i18n-zh
@@ -201,7 +231,17 @@
     (overview-card-reset-files . "重置文件（指南）")
     (overview-no-data . "(没有数据 — 按 [. g] 刷新)")
     (overview-stale . "(状态已更改 — 按 [. g] 刷新)")
-    (patch-opened . "已在补丁缓冲区中打开响应")))
+    (patch-opened . "已在补丁缓冲区中打开响应")
+    ;; Transient/AI Actions UI
+    (ai-suggest-prompt . "建议：")
+    (ai-suggest-copied . "magpt：建议命令已复制")
+    (ai-summary-copied . "magpt：摘要已复制")
+    (ai-no-suggestions . "未找到建议；运行 [. g] 或 u/b/f")
+    (ai-no-summary . "没有可用的摘要；运行 [. g] 或 u/b/f")
+    (ai-no-shell-cmd . "此建议中没有 shell 命令")
+    (ai-eshell-helper-missing . "magpt：eshell 帮助不可用（未加载 magpt-apply）")
+    (ai-eshell-inserted . "magpt：命令已插入到 eshell")
+    (ai-actions-reloaded . "magpt：AI 操作已从概览重新加载")))
 
 ;; Ukrainian
 (defconst magpt--i18n-uk
@@ -241,7 +281,17 @@
     (overview-card-reset-files . "Скинути файли (інструкція)")
     (overview-no-data . "(немає даних — натисніть [. g] для оновлення)")
     (overview-stale . "(стан змінився — натисніть [. g] для оновлення)")
-    (patch-opened . "Відповідь відкрито в буфері патчу")))
+    (patch-opened . "Відповідь відкрито в буфері патчу")
+    ;; Transient/AI Actions UI
+    (ai-suggest-prompt . "Пропозиція: ")
+    (ai-suggest-copied . "magpt: команди пропозиції скопійовано")
+    (ai-summary-copied . "magpt: зведення скопійовано")
+    (ai-no-suggestions . "Пропозицій не знайдено; запустіть [. g] або u/b/f")
+    (ai-no-summary . "Немає зведення; запустіть [. g] або u/b/f")
+    (ai-no-shell-cmd . "У цій пропозиції немає команди оболонки")
+    (ai-eshell-helper-missing . "magpt: помічник eshell недоступний (magpt-apply не завантажено)")
+    (ai-eshell-inserted . "magpt: команду вставлено в eshell")
+    (ai-actions-reloaded . "magpt: дії ШІ перезавантажено з огляду")))
 
 ;; Belarusian
 (defconst magpt--i18n-be
@@ -281,12 +331,22 @@
     (overview-card-reset-files . "Скінуць файлы (інструкцыя)")
     (overview-no-data . "(няма даных — націсніце [. g] для абнаўлення)")
     (overview-stale . "(стан змяніўся — націсніце [. g] для абнаўлення)")
-    (patch-opened . "Адказ адкрыты ў буферы патча")))
+    (patch-opened . "Адказ адкрыты ў буферы патча")
+    ;; Transient/AI Actions UI
+    (ai-suggest-prompt . "Прапанова: ")
+    (ai-suggest-copied . "magpt: каманды прапановы скапіраваны")
+    (ai-summary-copied . "magpt: зводку скапіявана")
+    (ai-no-suggestions . "Прапановы не знойдзены; запусціце [. g] або u/b/f")
+    (ai-no-summary . "Няма зводкі; запусціце [. g] або u/b/f")
+    (ai-no-shell-cmd . "У гэтай прапанове няма каманды абалонкі")
+    (ai-eshell-helper-missing . "magpt: памочнік eshell недаступны (magpt-apply не загружаны)")
+    (ai-eshell-inserted . "magpt: каманда ўстаўлена ў eshell")
+    (ai-actions-reloaded . "magpt: дзеянні ШІ перазагружаны з агляду")))
 
 (defun magpt--i18n (key &rest args)
   "Format localized message for KEY with ARGS using `magpt-info-language'."
-  (when (fboundp 'magpt--maybe-load-rc)
-    (magpt--maybe-load-rc))
+  ;; Do not force RC loading from here; interactive entry points call magpt--maybe-load-rc
+  ;; before user-visible actions. This avoids void-variable during partial reloads.
   (let* ((lang (magpt--lang-code))
          (tbl (pcase lang
                 ('ru magpt--i18n-ru)

@@ -29,6 +29,7 @@
 (declare-function magpt-explain-push-pull "magpt-tasks-assist" ())
 (declare-function magpt-explain-branches "magpt-tasks-assist" ())
 (declare-function magpt-restore-file-suggest "magpt-tasks-assist" ())
+(declare-function magpt--eshell-popup-insert "magpt-apply" (cmd))
 ;; History API
 (declare-function magpt--history-last-entry-for "magpt-history" (task))
 (declare-function magpt--entry-parse-json-safe "magpt-history" (entry))
@@ -204,6 +205,29 @@ Relies on newest-first ordering of `magpt--history-entries'."
       (kill-new cmds)
       (message "magpt: suggestion commands copied"))))
 
+(defun magpt-ai-actions-eshell-insert (&optional idx)
+  "Insert the first command of a suggestion into an eshell popup."
+  (interactive)
+  (magpt--ai-actions-init)
+  (if (zerop (length magpt--ai-actions-suggestions))
+      (user-error "No suggestions found; run [. g], or u/b/f")
+    (let* ((i (or idx (magpt--ai-actions-choose-index)))
+           (sug (nth i magpt--ai-actions-suggestions))
+           (cmds (plist-get sug :commands))
+           (lines (and (stringp cmds) (split-string cmds "\n")))
+           (first (and lines (seq-find (lambda (l)
+                                         (and (stringp l)
+                                              (> (length (string-trim l)) 0)
+                                              (not (string-prefix-p "#" (string-trim-left l))))))
+                       lines))))
+    (unless (stringp first)
+      (user-error "No shell command found in this suggestion"))
+    (unless (fboundp 'magpt--eshell-popup-insert)
+      (require 'magpt-apply nil t))
+    (if (fboundp 'magpt--eshell-popup-insert)
+        (magpt--eshell-popup-insert (string-trim first))
+      (user-error "magpt: eshell helper not available (magpt-apply not loaded)")))))
+
 (defun magpt-ai-actions-copy-summary ()
   "Copy the latest summary to the kill-ring."
   (interactive)
@@ -243,6 +267,7 @@ Relies on newest-first ordering of `magpt--history-entries'."
     [["Suggestions"
       ("p" "Preview suggestion..." magpt-ai-actions-preview)
       ("y" "Copy suggestion..." magpt-ai-actions-copy)
+      ("e" "Insert first command into eshell" magpt-ai-actions-eshell-insert)
       ("s" "Copy summary" magpt-ai-actions-copy-summary)
       ("c" "Commit with AI message" magpt-commit-staged)]
      ["Overview/Tasks"

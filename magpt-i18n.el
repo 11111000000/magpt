@@ -18,28 +18,41 @@
   (let* ((raw (or (and (boundp 'magpt-info-language) magpt-info-language) "English"))
          (l (downcase raw)))
     (cond
-     ;; Russian
-     ((string-match-p "\\`\\(ru\\|рус\\)" l) 'ru)
-     ;; Ukrainian (uk / укр / україн)
-     ((or (string-match-p "\\`uk" l)
+     ;; Russian (ru / rus / russian / рус / русский)
+     ((or (string-match-p "\\`ru\\b" l)
+          (string-match-p "\\`rus\\b" l)
+          (string-match-p "\\`russian\\b" l)
+          (string-match-p "рус" l)) 'ru)
+     ;; Ukrainian (uk / ukrainian / укр / україн)
+     ((or (string-match-p "\\`uk\\b" l)
+          (string-match-p "\\`ukrainian\\b" l)
           (string-match-p "укр" l)
           (string-match-p "україн" l)) 'uk)
-     ;; Belarusian (be / бел / беларус)
-     ((or (string-match-p "\\`be" l)
+     ;; Belarusian (be / belarusian / belorussian / бел / беларус)
+     ((or (string-match-p "\\`be\\b" l)
+          (string-match-p "\\`belarusian\\b" l)
+          (string-match-p "\\`belorussian\\b" l)
           (string-match-p "бел" l)
           (string-match-p "беларус" l)) 'be)
-     ;; Chinese (zh / 中文 / кит)
-     ((or (string-match-p "\\`zh" l)
+     ;; Chinese (zh / chinese / 中文 / кит)
+     ((or (string-match-p "\\`zh\\b" l)
+          (string-match-p "\\`chinese\\b" l)
           (string-match-p "中文" raw)
           (string-match-p "кит" l)) 'zh)
      ;; French kept for backward-compatibility if user sets it
-     ((string-match-p "\\`fr" l) 'fr)
+     ((string-match-p "\\`fr\\b" l) 'fr)
      ;; Default English
      (t 'en))))
 
 ;; English
 (defconst magpt--i18n-en
   '((confirm-send-full . "magpt: Send staged diff to LLM (%d bytes)? ")
+    ;; Titles and toggles
+    (overview-title . "AI overview (magpt)")
+    (overview-toggle-show . "[Show rationale/steps]")
+    (overview-toggle-hide . "[Hide rationale/steps]")
+    (overview-run-dot-g . "[Run . g]")
+    (ai-actions-hint . "[.] AI actions")
     (confirm-send-trunc . "magpt: Send staged diff to LLM (original %d bytes; sending %d bytes after truncation)? ")
     (request-llm-commit . "magpt: requesting LLM to generate commit message...")
     (result-copied . "magpt: result copied to kill-ring and shown in *magpt-commit*")
@@ -76,6 +89,11 @@
     (overview-card-branches . "Branches overview")
     (overview-card-restore-file . "Recover file (how-to)")
     (overview-card-reset-files . "Reset files (how-to)")
+    (overview-card-stash . "Stash guide")
+    (overview-card-undo-commits . "Undo commits (reset vs revert)")
+    (overview-card-reflog-rescue . "Reflog rescue")
+    (overview-card-detached-head . "Detached HEAD help")
+    (overview-card-set-upstream . "Set upstream help")
     (overview-no-data . "(no data - press [. g] to refresh)")
     (overview-stale . "(status changed - press [. g] to refresh)")
     (patch-opened . "Opened response in patch buffer")
@@ -88,11 +106,20 @@
     (ai-no-shell-cmd . "No shell command found in this suggestion")
     (ai-eshell-helper-missing . "magpt: eshell helper not available (magpt-apply not loaded)")
     (ai-eshell-inserted . "magpt: command inserted into eshell")
-    (ai-actions-reloaded . "magpt: AI actions reloaded from overview")))
+    (ai-actions-reloaded . "magpt: AI actions reloaded from overview")
+    ;; Task end-status
+    (task-done-json-ok . "magpt: %s done (JSON OK) — see AI overview")
+    (task-done-not-json . "magpt: %s done, but response is not JSON — open JSON to inspect") ))
 
 ;; Russian
 (defconst magpt--i18n-ru
   '((confirm-send-full . "magpt: Отправить staged‑дифф в LLM (%d байт)? ")
+    ;; Titles and toggles
+    (overview-title . "AI-обзор (magpt)")
+    (overview-toggle-show . "[Показать обоснование/шаги]")
+    (overview-toggle-hide . "[Скрыть обоснование/шаги]")
+    (overview-run-dot-g . "[Запустить . g]")
+    (ai-actions-hint . "[.] Действия ИИ")
     (confirm-send-trunc . "magpt: Отправить staged‑дифф в LLM (исходно %d байт; отправим %d байт после усечения)? ")
     (request-llm-commit . "magpt: запрашиваем LLM для генерации сообщения коммита...")
     (result-copied . "magpt: результат показан в *magpt-commit* и скопирован в kill-ring")
@@ -129,6 +156,11 @@
     (overview-card-branches . "Обзор веток")
     (overview-card-restore-file . "Восстановить файл (инструкция)")
     (overview-card-reset-files . "Сброс файлов (инструкция)")
+    (overview-card-stash . "Stash — руководство")
+    (overview-card-undo-commits . "Отмена коммитов (reset vs revert)")
+    (overview-card-reflog-rescue . "Reflog — спасение")
+    (overview-card-detached-head . "Detached HEAD — помощь")
+    (overview-card-set-upstream . "Upstream — настройка")
     (overview-no-data . "(нет данных - нажмите [. g] для обновления)")
     (overview-stale . "(статус изменился - нажмите [. g] для обновления)")
     (patch-opened . "Патч открыт в буфере")
@@ -141,11 +173,20 @@
     (ai-no-shell-cmd . "В этой подсказке нет команды оболочки")
     (ai-eshell-helper-missing . "magpt: помощник eshell недоступен (magpt-apply не загружен)")
     (ai-eshell-inserted . "magpt: команда вставлена в eshell")
-    (ai-actions-reloaded . "magpt: AI-действия обновлены из обзора")))
+    (ai-actions-reloaded . "magpt: AI-действия обновлены из обзора")
+    ;; Завершение задач
+    (task-done-json-ok . "magpt: %s выполнено (JSON OK) — смотрите AI-обзор")
+    (task-done-not-json . "magpt: %s выполнено, но ответ не JSON — откройте JSON для просмотра") ))
 
 ;; French (kept for compatibility)
 (defconst magpt--i18n-fr
   '((confirm-send-full . "magpt: Envoyer le diff indexé au LLM (%d octets) ? ")
+    ;; Titles and toggles
+    (overview-title . "Vue d'ensemble IA (magpt)")
+    (overview-toggle-show . "[Afficher raisonnement/étapes]")
+    (overview-toggle-hide . "[Masquer raisonnement/étapes]")
+    (overview-run-dot-g . "[Exécuter . g]")
+    (ai-actions-hint . "[.] Actions IA")
     (confirm-send-trunc . "magpt: Envoyer le diff indexé au LLM (original %d octets ; envoi de %d octets après troncature) ? ")
     (request-llm-commit . "magpt: demande au LLM de générer le message de commit...")
     (result-copied . "magpt: résultat copié dans le kill-ring et affiché dans *magpt-commit*")
@@ -191,11 +232,20 @@
     (ai-no-shell-cmd . "Aucune commande shell trouvée dans cette suggestion")
     (ai-eshell-helper-missing . "magpt : aide eshell non disponible (magpt-apply non chargé)")
     (ai-eshell-inserted . "magpt : commande insérée dans eshell")
-    (ai-actions-reloaded . "magpt : actions IA rechargées depuis l’aperçu")))
+    (ai-actions-reloaded . "magpt : actions IA rechargées depuis l’aperçu")
+    ;; Fin de tâche
+    (task-done-json-ok . "magpt : %s terminé (JSON OK) — voir l’aperçu IA")
+    (task-done-not-json . "magpt : %s terminé, mais la réponse n’est pas JSON — ouvrez le JSON pour inspecter") ))
 
 ;; Chinese (Simplified)
 (defconst magpt--i18n-zh
   '((confirm-send-full . "magpt：将已暂存的差异发送给 LLM（%d 字节）？ ")
+    ;; Titles and toggles
+    (overview-title . "AI 概览（magpt）")
+    (overview-toggle-show . "[显示 理由/步骤]")
+    (overview-toggle-hide . "[隐藏 理由/步骤]")
+    (overview-run-dot-g . "[运行 . g]")
+    (ai-actions-hint . "[.] AI 操作")
     (confirm-send-trunc . "magpt：将已暂存的差异发送给 LLM（原始 %d 字节；截断后发送 %d 字节）？ ")
     (request-llm-commit . "magpt：请求 LLM 生成提交消息...")
     (result-copied . "magpt：结果已显示在 *magpt-commit* 并复制到 kill-ring")
@@ -246,6 +296,12 @@
 ;; Ukrainian
 (defconst magpt--i18n-uk
   '((confirm-send-full . "magpt: Надіслати проіндексований diff до LLM (%d байт)? ")
+    ;; Titles and toggles
+    (overview-title . "Огляд ШІ (magpt)")
+    (overview-toggle-show . "[Показати обґрунтування/кроки]")
+    (overview-toggle-hide . "[Приховати обґрунтування/кроки]")
+    (overview-run-dot-g . "[Запустити . g]")
+    (ai-actions-hint . "[.] Дії ШІ")
     (confirm-send-trunc . "magpt: Надіслати проіндексований diff до LLM (спочатку %d байт; надішлемо %d байт після усікання)? ")
     (request-llm-commit . "magpt: запит до LLM для генерації повідомлення коміту...")
     (result-copied . "magpt: результат показано в *magpt-commit* і скопійовано в kill-ring")
@@ -296,6 +352,12 @@
 ;; Belarusian
 (defconst magpt--i18n-be
   '((confirm-send-full . "magpt: Адправіць праіндэксаваны diff у LLM (%d байт)? ")
+    ;; Titles and toggles
+    (overview-title . "Агляд ШІ (magpt)")
+    (overview-toggle-show . "[Паказаць абгрунтаванне/крокі]")
+    (overview-toggle-hide . "[Схаваць абгрунтаванне/крокі]")
+    (overview-run-dot-g . "[Запусціць . g]")
+    (ai-actions-hint . "[.] Дзеянні ШІ")
     (confirm-send-trunc . "magpt: Адправіць праіндэксаваны diff у LLM (першапачаткова %d байт; адправім %d байт пасля абразання)? ")
     (request-llm-commit . "magpt: запытваем у LLM згенераваць паведамленне каміту...")
     (result-copied . "magpt: вынік паказаны ў *magpt-commit* і скапіяваны ў kill-ring")
@@ -344,7 +406,8 @@
     (ai-actions-reloaded . "magpt: дзеянні ШІ перазагружаны з агляду")))
 
 (defun magpt--i18n (key &rest args)
-  "Format localized message for KEY with ARGS using `magpt-info-language'."
+  "Format localized message for KEY with ARGS using `magpt-info-language'.
+Never signal an error; fall back to a plain format string if formatting fails."
   ;; Do not force RC loading from here; interactive entry points call magpt--maybe-load-rc
   ;; before user-visible actions. This avoids void-variable during partial reloads.
   (let* ((lang (magpt--lang-code))
@@ -357,8 +420,15 @@
                 (_   magpt--i18n-en)))
          (fmt (or (alist-get key tbl) (alist-get key magpt--i18n-en) "")))
     (when (fboundp 'magpt--log)
-      (magpt--log "i18n: key=%S lang=%S fmt=%s" key lang fmt))
-    (if args (apply #'format fmt args) fmt)))
+      (ignore-errors
+        (magpt--log "i18n: key=%S lang=%S fmt=%s" key lang fmt)))
+    (condition-case _
+        (if args (apply #'format fmt args) fmt)
+      (error
+       ;; Fallback: best-effort concatenate when format fails
+       (mapconcat #'identity
+                  (cons fmt (mapcar (lambda (a) (format "%s" a)) args))
+                  " ")))))
 
 (provide 'magpt-i18n)
 

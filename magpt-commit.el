@@ -14,6 +14,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'magit nil t)
+(require 'magpt-log nil t)
 
 ;; External deps from core (magpt.el)
 (declare-function magpt--log "ext:magpt" (fmt &rest args))
@@ -239,7 +240,7 @@ insert the result there; otherwise show it in *magpt-commit*."
           (progn
             (when target (magpt--show-commit-overlay target))
             (message "%s" (magpt--i18n 'request-llm-commit))
-            (condition-case err
+            (condition-case e
                 (let ((gptel-model (or magpt-model gptel-model)))
                   (magpt--gptel-request
                    prompt
@@ -248,12 +249,17 @@ insert the result there; otherwise show it in *magpt-commit*."
                    :callback #'magpt--commit-callback))
               (error
                (when target (magpt--remove-commit-overlay target))
-               (message "%s" (magpt--i18n 'gptel-error (error-message-string err))))))
+               (ignore-errors
+                 (message "%s"
+                          (or (condition-case _
+                                  (magpt--i18n 'gptel-error (magpt--errstr e))
+                                (error (format "magpt: error calling gptel: %s" (magpt--errstr e))))
+                              (format "magpt: error calling gptel: %s" (magpt--errstr e))))))))
         (message "%s" (magpt--i18n 'sending-cancelled))))))
 
 (defun magpt--commit-callback (response info)
   "Callback for gptel commit generation. Insert or display the result."
-  (condition-case err
+  (condition-case e
       (let* ((errstr (plist-get info :error))
              (commit-buf (plist-get info :context))
              (target (or (and (buffer-live-p commit-buf)
@@ -284,7 +290,13 @@ insert the result there; otherwise show it in *magpt-commit*."
             (magpt--remove-commit-overlay commit-buf))
           (magpt--show-in-output-buffer text))))
     (error
-     (message "%s" (magpt--i18n 'callback-error (error-message-string err))))))
+     (let ((emsg (magpt--errstr e)))
+       (ignore-errors
+         (message "%s"
+                  (or (condition-case _
+                          (magpt--i18n 'callback-error emsg)
+                        (error (format "magpt: callback error: %s" emsg)))
+                      (format "magpt: callback error: %s" emsg))))))))
 
 ;;;###autoload
 (defun magpt-commit-staged ()
@@ -321,7 +333,7 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                 (progn
                   (magpt--show-commit-overlay target-buf)
                   (message "%s" (magpt--i18n 'request-llm-commit))
-                  (condition-case err
+                  (condition-case e
                       (let ((gptel-model (or magpt-model gptel-model)))
                         (magpt--gptel-request
                          prompt
@@ -330,7 +342,13 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                          :callback #'magpt--commit-callback))
                     (error
                      (magpt--remove-commit-overlay target-buf)
-                     (message "%s" (magpt--i18n 'gptel-error (error-message-string err))))))
+                     (let ((emsg (magpt--errstr e)))
+                       (ignore-errors
+                         (message "%s"
+                                  (or (condition-case _
+                                          (magpt--i18n 'gptel-error emsg)
+                                        (error (format "magpt: error calling gptel: %s" emsg)))
+                                      (format "magpt: error calling gptel: %s" emsg))))))))
               (message "%s" (magpt--i18n 'sending-cancelled)))
           (if (magpt--confirm-send orig-bytes send-bytes)
               (let (hook-fn remove-timer)
@@ -342,7 +360,7 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                           (when (magpt--commit-buffer-p buf)
                             (magpt--show-commit-overlay buf)
                             (message "%s" (magpt--i18n 'request-llm-commit))
-                            (condition-case err
+                            (condition-case e
                                 (let ((gptel-model (or magpt-model gptel-model)))
                                   (magpt--gptel-request
                                    prompt
@@ -351,18 +369,25 @@ Does not perform the commit; use standard C-c C-c to finalize. Requires Magit."
                                    :callback #'magpt--commit-callback))
                               (error
                                (magpt--remove-commit-overlay buf)
-                               (message "%s" (magpt--i18n 'gptel-error (error-message-string err)))))))))
+                               (let ((emsg (magpt--errstr e)))
+                                 (ignore-errors
+                                   (message "%s"
+                                            (or (condition-case _
+                                                    (magpt--i18n 'gptel-error emsg)
+                                                  (error (format "magpt: error calling gptel: %s" emsg)))
+                                                (format "magpt: error calling gptel: %s" emsg)))))))))))
                 (add-hook 'git-commit-setup-hook hook-fn)
                 (setq remove-timer
                       (run-at-time 20 nil
                                    (lambda ()
                                      (remove-hook 'git-commit-setup-hook hook-fn))))
-                (condition-case err
+                (condition-case e
                     (magit-commit-create '())
                   (error
                    (when (timerp remove-timer) (cancel-timer remove-timer))
                    (remove-hook 'git-commit-setup-hook hook-fn)
-                   (message "magpt: could not open Magit commit buffer: %s" (error-message-string err)))))
+                   (ignore-errors
+                     (message "magpt: could not open Magit commit buffer: %s" (magpt--errstr e))))))
             (message "%s" (magpt--i18n 'sending-cancelled))))))))
 
 (provide 'magpt-commit)

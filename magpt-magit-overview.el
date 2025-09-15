@@ -17,6 +17,7 @@
 (require 'magit nil t)
 (require 'magpt-apply nil t)
 (require 'magpt-history nil t)
+(require 'magpt-log nil t)
 
 (defcustom magpt-magit-overview-enabled t
   "If non-nil, insert a compact 'AI overview (magpt)' section into magit-status."
@@ -162,11 +163,13 @@ history changes (no need for the user to press \"g\")."
              (fboundp 'magit-insert-heading))
     (magit-insert-section (magit-section 'magpt-ai-overview)
       ;; Parent heading: only this line is highlighted by Magit.
-      (magit-insert-heading "AI overview (magpt)")
+      (magit-insert-heading (magpt--i18n 'overview-title))
       ;; Toggle educational fields (rationale/steps)
       (insert "  ")
       (insert-text-button
-       (if magpt-overview-show-educational-fields "[Hide rationale/steps]" "[Show rationale/steps]")
+       (if magpt-overview-show-educational-fields
+           (magpt--i18n 'overview-toggle-hide)
+         (magpt--i18n 'overview-toggle-show))
        'action (lambda (_btn)
                  (setq magpt-overview-show-educational-fields (not magpt-overview-show-educational-fields))
                  (when (fboundp 'magit-refresh) (ignore-errors (magit-refresh))))
@@ -183,12 +186,17 @@ history changes (no need for the user to press \"g\")."
              (pp (magpt--history-last-entry-for 'explain-push-pull))
              (br (magpt--history-last-entry-for 'explain-branches))
              (rs (magpt--history-last-entry-for 'reset-files-suggest))
-             (rf (magpt--history-last-entry-for 'restore-file-suggest)))
+             (rf (magpt--history-last-entry-for 'restore-file-suggest))
+             (st (magpt--history-last-entry-for 'explain-stash))
+             (uc (magpt--history-last-entry-for 'explain-undo-commits))
+             (rl (magpt--history-last-entry-for 'explain-reflog-rescue))
+             (dh (magpt--history-last-entry-for 'explain-detached-head))
+             (su (magpt--history-last-entry-for 'explain-set-upstream)))
         (if (not ex)
             (progn
               (insert (format "  %s\n" (magpt--i18n 'overview-no-data)))
               (insert "  ")
-              (insert-text-button "[Run . g]"
+              (insert-text-button (magpt--i18n 'overview-run-dot-g)
                                   'action #'magpt-explain-status
                                   'follow-link t
                                   'help-echo "Collect Explain Status now")
@@ -533,8 +541,208 @@ history changes (no need for the user to press \"g\")."
                       (insert (string-trim-right (plist-get rf :response)) "\n\n")))
                   (when (fboundp 'magpt--insert-entry-buttons)
                     (magpt--insert-entry-buttons rf)))))
+            ;; Child card: Stash guide
+            (when st
+              (magit-insert-section (magit-section 'magpt-ai-card-stash)
+                (magit-insert-heading (magpt--i18n 'overview-card-stash))
+                (let ((magpt-ui-density 'compact))
+                  (let ((data (and (plist-get st :valid) (magpt--entry-parse-json-safe st))))
+                    (if data
+                        (let* ((summary (alist-get 'summary data))
+                               (sugs (or (alist-get 'suggestions data) '()))
+                               (first (car sugs))
+                               (cmds (and first (alist-get 'commands first)))
+                               (cmd (and (listp cmds) (car cmds))))
+                          (when (stringp summary)
+                            (dolist (ln (split-string (string-trim-right summary) "\n"))
+                              (insert "  " ln "\n")))
+                          (when (stringp cmd)
+                            (insert "\n")
+                            (insert (format "      $ %s\n" cmd))
+                            (insert "      ")
+                            (insert-text-button "[Eshell]"
+                                                'action #'magpt--btn-eshell-insert
+                                                'follow-link t
+                                                'help-echo "Insert command into eshell (bottom popup)"
+                                                'magpt-command cmd)
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (stp steps)
+                                  (insert "        - " (format "%s" stp) "\n"))))))
+                      (insert (magpt--i18n 'overview-response) "\n")
+                      (insert (string-trim-right (plist-get st :response)) "\n\n")))
+                  (when (fboundp 'magpt--insert-entry-buttons)
+                    (magpt--insert-entry-buttons st)))))
+            ;; Child card: Undo commits (reset vs revert)
+            (when uc
+              (magit-insert-section (magit-section 'magpt-ai-card-undo-commits)
+                (magit-insert-heading (magpt--i18n 'overview-card-undo-commits))
+                (let ((magpt-ui-density 'compact))
+                  (let ((data (and (plist-get uc :valid) (magpt--entry-parse-json-safe uc))))
+                    (if data
+                        (let* ((summary (alist-get 'summary data))
+                               (sugs (or (alist-get 'suggestions data) '()))
+                               (first (car sugs))
+                               (cmds (and first (alist-get 'commands first)))
+                               (cmd (and (listp cmds) (car cmds))))
+                          (when (stringp summary)
+                            (dolist (ln (split-string (string-trim-right summary) "\n"))
+                              (insert "  " ln "\n")))
+                          (when (stringp cmd)
+                            (insert "\n")
+                            (insert (format "      $ %s\n" cmd))
+                            (insert "      ")
+                            (insert-text-button "[Eshell]"
+                                                'action #'magpt--btn-eshell-insert
+                                                'follow-link t
+                                                'help-echo "Insert command into eshell (bottom popup)"
+                                                'magpt-command cmd)
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (stp steps)
+                                  (insert "        - " (format "%s" stp) "\n"))))))
+                      (insert (magpt--i18n 'overview-response) "\n")
+                      (insert (string-trim-right (plist-get uc :response)) "\n\n")))
+                  (when (fboundp 'magpt--insert-entry-buttons)
+                    (magpt--insert-entry-buttons uc)))))
+            ;; Child card: Reflog rescue
+            (when rl
+              (magit-insert-section (magit-section 'magpt-ai-card-reflog-rescue)
+                (magit-insert-heading (magpt--i18n 'overview-card-reflog-rescue))
+                (let ((magpt-ui-density 'compact))
+                  (let ((data (and (plist-get rl :valid) (magpt--entry-parse-json-safe rl))))
+                    (if data
+                        (let* ((summary (alist-get 'summary data))
+                               (sugs (or (alist-get 'suggestions data) '()))
+                               (first (car sugs))
+                               (cmds (and first (alist-get 'commands first)))
+                               (cmd (and (listp cmds) (car cmds))))
+                          (when (stringp summary)
+                            (dolist (ln (split-string (string-trim-right summary) "\n"))
+                              (insert "  " ln "\n")))
+                          (when (stringp cmd)
+                            (insert "\n")
+                            (insert (format "      $ %s\n" cmd))
+                            (insert "      ")
+                            (insert-text-button "[Eshell]"
+                                                'action #'magpt--btn-eshell-insert
+                                                'follow-link t
+                                                'help-echo "Insert command into eshell (bottom popup)"
+                                                'magpt-command cmd)
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (stp steps)
+                                  (insert "        - " (format "%s" stp) "\n"))))))
+                      (insert (magpt--i18n 'overview-response) "\n")
+                      (insert (string-trim-right (plist-get rl :response)) "\n\n")))
+                  (when (fboundp 'magpt--insert-entry-buttons)
+                    (magpt--insert-entry-buttons rl)))))
+            ;; Child card: Detached HEAD help
+            (when dh
+              (magit-insert-section (magit-section 'magpt-ai-card-detached-head)
+                (magit-insert-heading (magpt--i18n 'overview-card-detached-head))
+                (let ((magpt-ui-density 'compact))
+                  (let ((data (and (plist-get dh :valid) (magpt--entry-parse-json-safe dh))))
+                    (if data
+                        (let* ((summary (alist-get 'summary data))
+                               (sugs (or (alist-get 'suggestions data) '()))
+                               (first (car sugs))
+                               (cmds (and first (alist-get 'commands first)))
+                               (cmd (and (listp cmds) (car cmds))))
+                          (when (stringp summary)
+                            (dolist (ln (split-string (string-trim-right summary) "\n"))
+                              (insert "  " ln "\n")))
+                          (when (stringp cmd)
+                            (insert "\n")
+                            (insert (format "      $ %s\n" cmd))
+                            (insert "      ")
+                            (insert-text-button "[Eshell]"
+                                                'action #'magpt--btn-eshell-insert
+                                                'follow-link t
+                                                'help-echo "Insert command into eshell (bottom popup)"
+                                                'magpt-command cmd)
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (stp steps)
+                                  (insert "        - " (format "%s" stp) "\n"))))))
+                      (insert (magpt--i18n 'overview-response) "\n")
+                      (insert (string-trim-right (plist-get dh :response)) "\n\n")))
+                  (when (fboundp 'magpt--insert-entry-buttons)
+                    (magpt--insert-entry-buttons dh)))))
+            ;; Child card: Set upstream help
+            (when su
+              (magit-insert-section (magit-section 'magpt-ai-card-set-upstream)
+                (magit-insert-heading (magpt--i18n 'overview-card-set-upstream))
+                (let ((magpt-ui-density 'compact))
+                  (let ((data (and (plist-get su :valid) (magpt--entry-parse-json-safe su))))
+                    (if data
+                        (let* ((summary (alist-get 'summary data))
+                               (sugs (or (alist-get 'suggestions data) '()))
+                               (first (car sugs))
+                               (cmds (and first (alist-get 'commands first)))
+                               (cmd (and (listp cmds) (car cmds))))
+                          (when (stringp summary)
+                            (dolist (ln (split-string (string-trim-right summary) "\n"))
+                              (insert "  " ln "\n")))
+                          (when (stringp cmd)
+                            (insert "\n")
+                            (insert (format "      $ %s\n" cmd))
+                            (insert "      ")
+                            (insert-text-button "[Eshell]"
+                                                'action #'magpt--btn-eshell-insert
+                                                'follow-link t
+                                                'help-echo "Insert command into eshell (bottom popup)"
+                                                'magpt-command cmd)
+                            (insert "\n\n"))
+                          (when magpt-overview-show-educational-fields
+                            (let ((rat (and first (alist-get 'rationale first)))
+                                  (steps (and first (alist-get 'steps first))))
+                              (when (stringp rat)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-rationale)))
+                                (dolist (ln (split-string (string-trim-right rat) "\n"))
+                                  (insert "        " ln "\n")))
+                              (when (listp steps)
+                                (insert (format "      %s\n" (magpt--i18n 'overview-steps)))
+                                (dolist (stp steps)
+                                  (insert "        - " (format "%s" stp) "\n"))))))
+                      (insert (magpt--i18n 'overview-response) "\n")
+                      (insert (string-trim-right (plist-get su :response)) "\n\n")))
+                  (when (fboundp 'magpt--insert-entry-buttons)
+                    (magpt--insert-entry-buttons su)))))
             ;; Hint line with key shortcut.
-            (insert (propertize "  [.] AI actions\n" 'face 'magpt-badge-info-face))
+            (insert (propertize (concat "  " (magpt--i18n 'ai-actions-hint) "\n") 'face 'magpt-badge-info-face))
             (insert "\n")))))))
 
 (provide 'magpt-magit-overview)

@@ -34,6 +34,20 @@ If nil or non-positive, history is unbounded."
 ;; Forward declaration for sanitizer
 (declare-function magpt--sanitize-response "magpt-gpt" (s))
 
+(defun magpt--history--fallback-refresh-magit ()
+  "Fallback: мягко обновить видимые magit-status, если нет подписчиков на хук."
+  (when (featurep 'magit)
+    (run-at-time 0 nil
+                 (lambda ()
+                   (dolist (win (window-list))
+                     (with-current-buffer (window-buffer win)
+                       (when (derived-mode-p 'magit-status-mode)
+                         (condition-case _
+                             (progn
+                               (when (fboundp 'magit-refresh) (magit-refresh))
+                               (when (fboundp 'magit-refresh-buffer) (magit-refresh-buffer)))
+                           (error nil)))))))))
+
 (defun magpt--history-append-entry (task request response &optional note &rest kvs)
   "Append an entry to history for TASK and run update hooks.
 Extra KV pairs can be provided in KVS to extend the stored plist."
@@ -67,11 +81,21 @@ Extra KV pairs can be provided in KVS to extend the stored plist."
       (setcdr (nthcdr (1- magpt-history-max-entries) magpt--history-entries) nil))
     ;; Fire notification hook if defined in parent.
     (when (boundp 'magpt-history-changed-hook)
-      (when (fboundp 'magpt--log)
-        (magpt--log "history: run-changed-hook fns=%d"
-                    (length (and (boundp 'magpt-history-changed-hook)
-                                 (symbol-value 'magpt-history-changed-hook)))))
-      (run-hooks 'magpt-history-changed-hook))))
+      (let* ((n (length (and (boundp 'magpt-history-changed-hook)
+                             (symbol-value 'magpt-history-changed-hook)))))
+        (when (fboundp 'magpt--log)
+          (magpt--log "history: run-changed-hook fns=%d" n))
+        (condition-case eh
+            (run-hooks 'magpt-history-changed-hook)
+          (error
+           (when (fboundp 'magpt--log)
+             (magpt--log "history: changed-hook error: %s"
+                         (if (fboundp 'magpt--errstr)
+                             (magpt--errstr eh)
+                           (error-message-string eh))))))
+        ;; Если нет подписчиков (n=0), аккуратно обновим magit-status сами.
+        (when (zerop n)
+          (ignore-errors (magpt--history--fallback-refresh-magit)))))))
 
 (defun magpt--history-tasks ()
   "Return a list of unique task symbols present in history."

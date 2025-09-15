@@ -11,8 +11,10 @@
 ;;; Code:
 
 (require 'subr-x)
+(require 'cl-lib)
 (require 'gptel)
 (require 'json)
+(require 'magpt-log nil t)
 
 ;; External deps from core (magpt.el)
 (declare-function magpt--log "ext:magpt" (fmt &rest args))
@@ -70,13 +72,23 @@
                     ty preview (and (listp info)
                                     (ignore-errors
                                       (cl-subseq info 0 (min 10 (length info))))))))
-    (condition-case err
+    (condition-case e
         (funcall cb resp info)
       (error
-       (magpt--log "callback exception: %s" (error-message-string err))
-       (magpt--log "callback exception: signal=%S data=%S" (car-safe err) (cdr-safe err))
-       (magpt--log "callback exception: BT:\n%s" (magpt--backtrace-string))
-       (message "%s" (magpt--i18n 'callback-error (error-message-string err)))))))
+       (let* ((emsg (or (ignore-errors
+                          (if (fboundp 'magpt--errstr)
+                              (magpt--errstr e)
+                            (error-message-string e)))
+                        "<no-error-object>")))
+         (magpt--log "callback exception: %s" emsg)
+         (magpt--log "callback exception (raw): %S" e)
+         (magpt--log "callback exception: BT:\n%s" (magpt--backtrace-string))
+         (ignore-errors
+           (let ((base (or (condition-case _
+                               (magpt--i18n 'callback-error emsg)
+                             (error (format "magpt: callback error: %s" emsg)))
+                           (format "magpt: callback error: %s" emsg))))
+             (message "%s — raw: %S" base e))))))))
 
 (defun magpt--gptel-request (prompt &rest args)
   "Call `gptel-request' with PROMPT and ARGS, adding logging and safe callback."

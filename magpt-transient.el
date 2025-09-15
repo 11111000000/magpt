@@ -17,6 +17,7 @@
 (require 'magit nil t)
 (require 'transient nil t)
 (require 'magpt-history nil t)
+(require 'magpt-log nil t)
 ;; transient--prefix is defined by Transient; don't bind it here to avoid unbinding on unload.
 ;; Do not force logging off here; use a permissive default so core defcustom can take over.
 (declare-function magpt--log "ext:magpt" (fmt &rest args))
@@ -81,12 +82,12 @@
 (defun magpt--transient-append-suffix-safe (parent pos spec)
   "Try to append SPEC after POS in PARENT transient. Return non-nil on success."
   (when (featurep 'transient)
-    (condition-case err
+    (condition-case e
         (prog1 t (transient-append-suffix parent pos spec))
       (error
        (when (fboundp 'magpt--log)
          (magpt--log "transient append failed: parent=%S pos=%S err=%s"
-                     parent pos (error-message-string err)))
+                     parent pos (magpt--errstr e)))
        nil))))
 
 (defun magpt--transient-remove-suffix-safe (parent key)
@@ -111,27 +112,44 @@
   :global t
   :group 'magpt
   (if magpt-mode
-      (with-eval-after-load 'magit
-        ;; Commit transient: add AI commit entry
-        (magpt--transient-append-suffix-safe 'magit-commit "c"
-                                             `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged))
-        ;; Magit dispatch: robust insertion (no hard dependency on a specific anchor).
-        (magpt--transient-add-to-magit-dispatch)
-        ;; Direct key in Magit Status buffer: "." opens AI actions immediately (without dispatch).
-        (when (boundp 'magit-status-mode-map)
-          (define-key magit-status-mode-map (kbd ".") #'magpt-ai-actions-entry))
-        ;; Magit Status: AI overview section (read-only; no background calls)
-        ;; Add after built-in sections: append so the AI overview appears at the bottom.
-        (add-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview t))
+      (progn
+        ;; Enable: append our entries/keys/sections
+        (with-eval-after-load 'magit
+          ;; Commit transient: add AI commit entry
+          (magpt--transient-append-suffix-safe
+           'magit-commit "c"
+           `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged))
+          ;; Magit dispatch: robust insertion (no hard dependency on a specific anchor).
+          (magpt--transient-add-to-magit-dispatch)
+          ;; Direct key in Magit Status buffer: "." opens AI actions immediately (without dispatch).
+          (when (boundp 'magit-status-mode-map)
+            (define-key magit-status-mode-map (kbd ".") #'magpt-ai-actions-entry))
+          ;; Magit Status: AI overview section (append so it appears at the bottom).
+          (add-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview t))
+        ;; If Magit is already loaded, ensure immediate installation too.
+        (when (featurep 'magit)
+          (ignore-errors
+            (magpt--transient-append-suffix-safe
+             'magit-commit "c"
+             `("i" ,(magpt--transient-desc "Commit with AI message (magpt)") magpt-commit-staged)))
+          (ignore-errors (magpt--transient-add-to-magit-dispatch))
+          (when (boundp 'magit-status-mode-map)
+            (define-key magit-status-mode-map (kbd ".") #'magpt-ai-actions-entry))
+          (add-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview t)))
+    ;; Disable: remove our entries/keys/sections
     (with-eval-after-load 'magit
       (magpt--transient-remove-suffix-safe 'magit-commit "i")
       (magpt--transient-remove-suffix-safe 'magit-dispatch ".")
-      ;; Unbind our direct key when disabling mode.
+      (when (boundp 'magit-status-mode-map)
+        (define-key magit-status-mode-map (kbd ".") nil))
+      (remove-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview))
+    ;; If Magit уже загружен — привести состояние к "выключено" немедленно.
+    (when (featurep 'magit)
+      (ignore-errors (magpt--transient-remove-suffix-safe 'magit-commit "i"))
+      (ignore-errors (magpt--transient-remove-suffix-safe 'magit-dispatch "."))
       (when (boundp 'magit-status-mode-map)
         (define-key magit-status-mode-map (kbd ".") nil))
       (remove-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview))))
-
-
 
 ;; AI Actions transient (moved from magpt.el)
 
@@ -294,7 +312,7 @@ Relies on newest-first ordering of `magpt--history-entries'."
     (when (fboundp 'magpt--log)
       (magpt--log "ai-actions-reload: suggestions=%d" n)))
   (when (featurep 'transient)
-    (condition-case err
+    (condition-case e
         (progn
           (when (fboundp 'magpt--log)
             (magpt--log "ai-actions-reload: calling magpt-ai-actions interactively"))
@@ -304,7 +322,7 @@ Relies on newest-first ordering of `magpt--history-entries'."
       (error
        (when (fboundp 'magpt--log)
          (magpt--log "ai-actions-reload: interactive magpt-ai-actions error: %s"
-                     (error-message-string err))))))
+                     (magpt--errstr e))))))
   (message "%s" (magpt--i18n 'ai-actions-reloaded)))
 
 (defcustom magpt-ai-actions-auto-reload t
@@ -379,12 +397,12 @@ When the AI Actions transient is open, the UI is also reloaded."
         (magpt--log "ai-actions(fallback): init suggestions=%d summary?=%s"
                     n (if (and (stringp magpt--ai-actions-summary)
                                (> (length magpt--ai-actions-summary) 0)) "t" "nil")))
-      (condition-case err
+      (condition-case e
           (call-interactively #'magpt-ai-actions-preview)
         (error
          (when (fboundp 'magpt--log)
-           (magpt--log "ai-actions(fallback): preview error: %s" (error-message-string err)))
-         (signal (car err) (cdr err)))))))
+           (magpt--log "ai-actions(fallback): preview error: %s" (magpt--errstr e)))
+         (message "%s" (magpt--i18n 'callback-error (magpt--errstr e))))))))
 
 (unless (fboundp 'magpt-ai-actions-entry)
   (defun magpt-ai-actions-entry ()
@@ -396,7 +414,7 @@ When the AI Actions transient is open, the UI is also reloaded."
                   (ignore-errors (magpt--project-root))
                   (if (featurep 'transient) "t" "nil")))
     (if (featurep 'transient)
-        (condition-case err
+        (condition-case e
             (progn
               (when (fboundp 'magpt--log)
                 (magpt--log "ai-actions-entry: calling magpt-ai-actions interactively"))
@@ -406,7 +424,7 @@ When the AI Actions transient is open, the UI is also reloaded."
           (error
            (when (fboundp 'magpt--log)
              (magpt--log "ai-actions-entry: interactive magpt-ai-actions error: %s; fallback to text UI"
-                         (error-message-string err)))
+                         (magpt--errstr e)))
            ;; Fallback to non-transient UI if Transient is not ready.
            (magpt-ai-actions)))
       (progn

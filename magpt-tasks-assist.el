@@ -16,6 +16,7 @@
 (require 'subr-x)
 (require 'seq)
 (require 'magit nil t)
+(require 'magpt-log nil t)
 
 ;; Forward declarations to other magpt modules / core helpers.
 (declare-function magpt--history-append-entry "magpt-history" (task request response &optional note &rest kvs))
@@ -150,11 +151,11 @@ Keys are resolved from `magit-status-mode-map' and Transient suffixes when avail
 (defun magpt--format-magit-keys-cheatsheet-safe ()
   "Safe wrapper around `magpt--format-magit-keys-cheatsheet' with timeout and logging."
   (let ((start (float-time)) out)
-    (condition-case err
+    (condition-case e
         (with-timeout (0.5 (setq out ""))
           (setq out (or (magpt--format-magit-keys-cheatsheet) "")))
       (error
-       (magpt--log "magit-keys-cheatsheet error: %s" (error-message-string err))
+       (magpt--log "magit-keys-cheatsheet error: %s" (magpt--errstr e))
        (setq out "")))
     (magpt--log "magit-keys-cheatsheet: dur=%.3fs bytes=%d"
                 (- (float-time) start) (length out))
@@ -502,8 +503,19 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 (defun magpt-explain-push-pull ()
   "Run the 'Push/Pull advice' assist task (read-only)."
   (interactive)
-  (magpt--ensure-assist-ready)
-  (magpt-run-task 'explain-push-pull))
+  (magpt--log "key [. u]: magpt-explain-push-pull invoked buffer=%s root=%s"
+              (buffer-name) (ignore-errors (magpt--project-root)))
+  (condition-case magpt--e
+      (progn
+        (magpt--ensure-assist-ready)
+        (magpt-run-task 'explain-push-pull))
+    (quit
+     (magpt--log "explain-push-pull: quit (transient closed)"))
+    (error
+     (let* ((emsg (condition-case _ (error-message-string magpt--e) (error "<no-error-object>"))))
+       (magpt--log "explain-push-pull: ERROR: %s" emsg)
+       (magpt--log "explain-push-pull: BT:\n%s" (magpt--backtrace-string))
+       (message "magpt: task explain-push-pull failed: %s (see *magpt-log*)" emsg)))))
 
 ;; Branches overview
 
@@ -556,8 +568,19 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 (defun magpt-explain-branches ()
   "Run the 'Branches overview' assist task (read-only)."
   (interactive)
-  (magpt--ensure-assist-ready)
-  (magpt-run-task 'explain-branches))
+  (magpt--log "key [. b]: magpt-explain-branches invoked buffer=%s root=%s"
+              (buffer-name) (ignore-errors (magpt--project-root)))
+  (condition-case magpt--e
+      (progn
+        (magpt--ensure-assist-ready)
+        (magpt-run-task 'explain-branches))
+    (quit
+     (magpt--log "explain-branches: quit (transient closed)"))
+    (error
+     (let* ((emsg (condition-case _ (error-message-string magpt--e) (error "<no-error-object>"))))
+       (magpt--log "explain-branches: ERROR: %s" emsg)
+       (magpt--log "explain-branches: BT:\n%s" (magpt--backtrace-string))
+       (message "magpt: task explain-branches failed: %s (see *magpt-log*)" emsg)))))
 
 ;; Recover file (how-to)
 
@@ -622,8 +645,19 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 (defun magpt-restore-file-suggest (&optional path rev)
   "Run 'Recover file (how-to)' assist task; prompts for PATH/REV if not provided."
   (interactive)
-  (magpt--ensure-assist-ready)
-  (magpt-run-task 'restore-file-suggest (list :path path :rev rev)))
+  (magpt--log "key [. f]: magpt-restore-file-suggest invoked buffer=%s root=%s"
+              (buffer-name) (ignore-errors (magpt--project-root)))
+  (condition-case magpt--e
+      (progn
+        (magpt--ensure-assist-ready)
+        (magpt-run-task 'restore-file-suggest (list :path path :rev rev)))
+    (quit
+     (magpt--log "restore-file-suggest: quit (transient closed)"))
+    (error
+     (let* ((emsg (condition-case _ (error-message-string magpt--e) (error "<no-error-object>"))))
+       (magpt--log "restore-file-suggest: ERROR: %s" emsg)
+       (magpt--log "restore-file-suggest: BT:\n%s" (magpt--backtrace-string))
+       (message "magpt: task restore-file-suggest failed: %s (see *magpt-log*)" emsg)))))
 
 (defvar magpt--assist-tasks-registered nil
   "Non-nil when assist tasks have been registered in the registry.")
@@ -785,7 +819,7 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (magpt--log "key [. g]: magpt-explain-status invoked buffer=%s root=%s"
               (buffer-name)
               (ignore-errors (magpt--project-root)))
-  (condition-case magpt--e
+  (condition-case e
       (progn
         (magpt--log "explain-status: ensure start")
         (magpt--ensure-assist-ready)
@@ -796,12 +830,8 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
      ;; Closing/cancelling Transient — keep logs quiet.
      (magpt--log "explain-status: quit (transient closed)"))
     (error
-     (let* ((emsg (condition-case _ (error-message-string magpt--e)
-                    (error "<no-error-object>")))
-            (esym (car-safe magpt--e))
-            (edata (cdr-safe magpt--e)))
+     (let ((emsg (magpt--errstr e)))
        (magpt--log "explain-status: ERROR: %s" emsg)
-       (magpt--log "explain-status: signal=%S data=%S" esym edata)
        (magpt--log "explain-status: buffer=%s default-directory=%s"
                    (buffer-name) default-directory)
        (magpt--log "explain-status: BT:\n%s" (magpt--backtrace-string))))))
@@ -809,15 +839,37 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 (defun magpt-commit-lint-suggest ()
   "Run the 'Commit Lint/Fix Suggest' task and update AI overview in Magit (read-only)."
   (interactive)
-  (magpt--ensure-assist-ready)
-  (magpt-run-task 'commit-lint-suggest))
+  (magpt--log "key [.] commit-lint-suggest: invoked buffer=%s root=%s"
+              (buffer-name) (ignore-errors (magpt--project-root)))
+  (condition-case magpt--e
+      (progn
+        (magpt--ensure-assist-ready)
+        (magpt-run-task 'commit-lint-suggest))
+    (quit
+     (magpt--log "commit-lint-suggest: quit (transient closed)"))
+    (error
+     (let* ((emsg (condition-case _ (error-message-string magpt--e) (error "<no-error-object>"))))
+       (magpt--log "commit-lint-suggest: ERROR: %s" emsg)
+       (magpt--log "commit-lint-suggest: BT:\n%s" (magpt--backtrace-string))
+       (message "magpt: task commit-lint-suggest failed: %s (see *magpt-log*)" emsg)))))
 
 ;;;###autoload
 (defun magpt-branch-name-suggest ()
   "Run the 'Branch Name Suggest' task and update AI overview in Magit (read-only)."
   (interactive)
-  (magpt--ensure-assist-ready)
-  (magpt-run-task 'branch-name-suggest))
+  (magpt--log "key [.] branch-name-suggest: invoked buffer=%s root=%s"
+              (buffer-name) (ignore-errors (magpt--project-root)))
+  (condition-case magpt--e
+      (progn
+        (magpt--ensure-assist-ready)
+        (magpt-run-task 'branch-name-suggest))
+    (quit
+     (magpt--log "branch-name-suggest: quit (transient closed)"))
+    (error
+     (let* ((emsg (condition-case _ (error-message-string magpt--e) (error "<no-error-object>"))))
+       (magpt--log "branch-name-suggest: ERROR: %s" emsg)
+       (magpt--log "branch-name-suggest: BT:\n%s" (magpt--backtrace-string))
+       (message "magpt: task branch-name-suggest failed: %s (see *magpt-log*)" emsg)))))
 
 ;; P2: Reset files (how-to)
 
@@ -1027,8 +1079,28 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
 (defun magpt-explain-stash ()
   "Run 'Stash guide' assist task."
   (interactive)
-  (magpt--ensure-assist-ready)
-  (magpt-run-task 'explain-stash))
+  (condition-case e
+      (progn
+        (magpt--ensure-assist-ready)
+        (magpt-run-task 'explain-stash))
+    (quit
+     (magpt--log "explain-stash: quit (transient closed)"))
+    (error
+     (let* ((err e)
+            (emsg (or (ignore-errors
+                        (if (fboundp 'magpt--errstr)
+                            (magpt--errstr err)
+                          (error-message-string err)))
+                      "<no-error-object>")))
+       ;; Доп. диагностика: сырой объект условия и подсказка про transient
+       (magpt--log "explain-stash: ERROR(raw): type=%S data=%S" (type-of err) err)
+       (when (and (stringp emsg)
+                  (string-match-p "void: e" emsg)
+                  (featurep 'transient))
+         (magpt--log "explain-stash: SUSPECT transient/debug closure captured free var ‘e’"))
+       (magpt--log "explain-stash: ERROR: %s" emsg)
+       (magpt--log "explain-stash: BT:\n%s" (magpt--backtrace-string))
+       (message "%s" (magpt--i18n 'callback-error emsg))))))
 
 ;; P2: Detached HEAD
 

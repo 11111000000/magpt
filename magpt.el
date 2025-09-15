@@ -49,6 +49,7 @@
 (defvar gptel-model nil) ;; ensure bound during reloads to avoid mode-line errors
 (require 'magit nil t)     ;; Optional; used when available
 (require 'transient nil t) ;; Optional; used when available
+(require 'magpt-log nil t)
 (require 'magpt-ui-preview nil t)
 (require 'magpt-magit-overview nil t)
 (require 'magpt-history nil t) ;; ensure history API is accessible
@@ -74,7 +75,14 @@
 (declare-function magpt--recent-git-output-get "magpt-git" (dir))
 (declare-function magpt--git-apply-temp "magpt-git" (dir patch &rest args))
 (declare-function magpt--git-apply-check-temp "magpt-git" (dir patch &rest args))
-(eval-when-compile (defvar transient--prefix))
+;; `transient--prefix' is declared/owned by the Transient package at runtime.
+;; DO NOT bind it at runtime in this feature: doing so registers the variable
+;; as belonging to this feature and `unload-feature' may unbind it later,
+;; causing transient to see a "void variable" when it runs.
+;; Keep only a compile-time declaration so the byte-compiler is quiet without
+;; registering the variable at runtime.
+(eval-when-compile
+  (defvar transient--prefix))
 
 ;;;; Section: Feature flags and “public” groups
 ;;
@@ -297,16 +305,18 @@ user RC changed since the last call."
 
 (defun magpt--log (fmt &rest args)
   "Append a diagnostic line to `magpt-log-buffer-name' and echo minimal info."
-  (when magpt-log-enabled
-    (let ((buf (get-buffer-create magpt-log-buffer-name)))
+  (when (and (boundp 'magpt-log-enabled) magpt-log-enabled)
+    (let ((buf (get-buffer-create (if (boundp 'magpt-log-buffer-name)
+                                      magpt-log-buffer-name
+                                    "*magpt-log*"))))
       (with-current-buffer buf
         (goto-char (point-max))
         (let* ((ts (format-time-string "%Y-%m-%d %H:%M:%S"))
-               (line (condition-case err
+               (line (condition-case lerr
                          (apply #'format fmt args)
                        (error
                         (format "LOG-FMT-ERROR: fmt=%S args=%S err=%s"
-                                fmt args (error-message-string err))))))
+                                fmt args (error-message-string lerr))))))
           (insert (format "[%s] %s\n" ts line)))))))
 
 (defun magpt--backtrace-string ()
@@ -366,73 +376,146 @@ user RC changed since the last call."
   "Register TASK (a `magpt-task' struct) in the registry."
   (puthash (magpt-task-name task) task magpt--tasks))
 
+(defun magpt--safe-errstr (err)
+  "Return a human-friendly string for ERR without throwing."
+  (or (ignore-errors
+        (if (fboundp 'magpt--errstr)
+            (magpt--errstr err)
+          (error-message-string err)))
+      "<no-error-object>"))
+
+(defun magpt--task-collect-context (task ctx)
+  "Collect context for TASK using its context-fn and return (DATA PREVIEW BYTES)."
+  (magpt--log "run-task: %s collecting context..." (magpt-task-name task))
+  (funcall (magpt-task-context-fn task) ctx))
+
+(defun magpt--task-build-prompt (task data bytes)
+  "Build prompt for TASK from DATA; BYTES used for logging."
+  (magpt--log "run-task: %s building prompt (bytes=%s)..." (magpt-task-name task) (or bytes -1))
+  (funcall (magpt-task-prompt-fn task) data))
+
+(defun magpt--task-should-skip-p (bytes)
+  "Return non-nil when BYTES indicate an empty/zero-sized context."
+  (and (or (null bytes) (zerop bytes))))
+
+(defun magpt--task-confirm-send (task bytes)
+  "Return t if sending should proceed for TASK with BYTES."
+  (if (magpt-task-confirm-send? task)
+      (magpt--confirm-send bytes bytes)
+    t))
+
+(defun magpt--task-handle-callback (task out data)
+  "Handle successful TASK callback with OUT string and DATA.
+Ensure history storage is available to avoid void-variable on append."
+  ;; Make sure history storage is loaded and base variable is bound.
+  (unless (boundp 'magpt--history-entries)
+    (require 'magpt-history nil t)
+    (unless (boundp 'magpt--history-entries)
+      (defvar magpt--history-entries nil)))
+  (funcall (magpt-task-render-fn task) out data)
+  (when (magpt-task-apply-fn task)
+    (funcall (magpt-task-apply-fn task) out data)))
+
+(defun magpt--task-dispatch (task prompt data bytes)
+  "Dispatch PROMPT for TASK and handle async callback; DATA/BYTES for logging."
+  (let ((gptel-model (or magpt-model gptel-model)))
+    (magpt--log "run-task: %s bytes=%d info-lang=%S commit-lang=%S prompt-preview=%s"
+                (magpt-task-name task) (or bytes -1) magpt-info-language magpt-commit-language
+                (let ((n (min 180 (length prompt)))) (substring prompt 0 n)))
+    (message "magpt: requesting %s..." (magpt-task-name task))
+    (condition-case gerr
+        (let ((sys (pcase (magpt-task-name task)
+                     ((or 'stage-by-intent-hunks 'resolve-conflict-here) nil)
+                     (_ (magpt--system-prompt 'info)))))
+          (magpt--gptel-request
+           prompt
+           :system sys
+           :callback
+           (lambda (resp info)
+             (ignore info)
+             (let ((magpt--current-request prompt))
+               (condition-case e2
+                   (let* ((out (string-trim (magpt--response->string resp)))
+                          ;; Используем тот же санитайзер, что и история, чтобы статус в минибуфере
+                          ;; соответствовал реальности (strip fenced JSON и пр.)
+                          (san (if (fboundp 'magpt--sanitize-response)
+                                   (magpt--sanitize-response out)
+                                 out))
+                          (name (magpt-task-name task)))
+                     (magpt--log "task-callback: %s resp-type=%S bytes=%d preview=%s"
+                                 name (type-of resp) (length out)
+                                 (substring out 0 (min 180 (length out))))
+                     (magpt--task-handle-callback task out data)
+                     ;; User-visible outcome message: JSON OK / not JSON / empty (по san)
+                     (cond
+                      ((or (not (stringp san)) (string-empty-p san))
+                       (message "%s" (magpt--i18n 'task-empty-response2 name)))
+                      ((condition-case _ (progn (json-parse-string san) t)
+                         (error nil))
+                       (message "%s" (magpt--i18n 'task-done-json-ok name)))
+                      (t
+                       (message "%s" (magpt--i18n 'task-done-json-invalid name)))))
+                 (error
+                  (let* ((err e2)
+                         (emsg (magpt--safe-errstr err)))
+                    (magpt--log "task-callback exception: %s" emsg)
+                    (magpt--log "task-callback exception (raw): %S" err)
+                    (magpt--log "task-callback exception: BT:\n%s" (magpt--backtrace-string))
+                    ;; Append an error entry so Overview reflects the failure
+                    (ignore-errors
+                      (magpt--history-append-error-safe (magpt-task-name task)
+                                                        (or magpt--current-request "")
+                                                        emsg))
+                    (ignore-errors
+                      (message "%s"
+                               (or (condition-case _
+                                       (magpt--i18n 'callback-error emsg)
+                                     (error (format "magpt: callback error: %s" emsg)))
+                                   (format "magpt: callback error: %s" emsg))))))))))
+          (magpt--log "run-task: %s dispatched to gptel OK" (magpt-task-name task)))
+      (error
+       (let ((emsg (magpt--safe-errstr gerr)))
+         ;; Record error in history so user sees a card even if callback never arrives.
+         (ignore-errors
+           (magpt--history-append-error-safe (magpt-task-name task) prompt emsg))
+         ;; Log only; do not message the user here — async callback may still arrive.
+         (magpt--log "gptel-request error for %s: %s\nBT:\n%s"
+                     (magpt-task-name task)
+                     emsg
+                     (magpt--backtrace-string)))))))
+
+(defun magpt--handle-run-task-exception (err)
+  "Log and surface a user-friendly message for ERR raised during magpt--run-task."
+  (let ((emsg (magpt--safe-errstr err)))
+    (magpt--log "run-task exception: %s" emsg)
+    (magpt--log "run-task exception (raw): %S" err)
+    (magpt--log "run-task exception: BT:\n%s" (magpt--backtrace-string))
+    (ignore-errors
+      (message "%s"
+               (or (condition-case _
+                       (magpt--i18n 'callback-error emsg)
+                     (error (format "magpt: callback error: %s" emsg)))
+                   (format "magpt: callback error: %s" emsg))))))
+
 (defun magpt--run-task (task &optional ctx)
   "Run TASK: collect context, build prompt, request model, then render/apply."
   (magpt--log "run-task: START name=%s buffer=%s root=%s"
               (magpt-task-name task)
               (buffer-name)
               (ignore-errors (magpt--project-root)))
-  (condition-case magpt--e
+  (condition-case e
       (pcase-let* ((`(,data ,_preview ,bytes)
-                    (progn
-                      (magpt--log "run-task: %s collecting context..." (magpt-task-name task))
-                      (funcall (magpt-task-context-fn task) ctx)))
+                    (magpt--task-collect-context task ctx))
                    (prompt
-                    (progn
-                      (magpt--log "run-task: %s building prompt (bytes=%s)..." (magpt-task-name task) (or bytes -1))
-                      (funcall (magpt-task-prompt-fn task) data))))
-        (if (and (or (null bytes) (zerop bytes)))
+                    (magpt--task-build-prompt task data bytes)))
+        (if (magpt--task-should-skip-p bytes)
             (let ((name (magpt-task-name task)))
               (magpt--log "run-task: %s skipped (empty context)" name)
               (message "magpt: nothing to send for %s (empty context)" name))
-          (let ((ok (if (magpt-task-confirm-send? task)
-                        (magpt--confirm-send bytes bytes)
-                      t)))
-            (when ok
-              (let ((gptel-model (or magpt-model gptel-model)))
-                (magpt--log "run-task: %s bytes=%d info-lang=%S commit-lang=%S prompt-preview=%s"
-                            (magpt-task-name task) (or bytes -1) magpt-info-language magpt-commit-language
-                            (let ((n (min 180 (length prompt)))) (substring prompt 0 n)))
-                (message "magpt: requesting %s..." (magpt-task-name task))
-                (condition-case gerr
-                    (let ((sys (pcase (magpt-task-name task)
-                                 ((or 'stage-by-intent-hunks 'resolve-conflict-here) nil)
-                                 (_ (magpt--system-prompt 'info)))))
-                      (magpt--gptel-request
-                       prompt
-                       :system sys
-                       :callback
-                       (lambda (resp info)
-                         (ignore info)
-                         (let ((magpt--current-request prompt))
-                           (condition-case cerr
-                               (let ((out (string-trim (magpt--response->string resp))))
-                                 (magpt--log "task-callback: %s resp-type=%S out-preview=%s"
-                                             (magpt-task-name task) (type-of resp)
-                                             (substring out 0 (min 180 (length out))))
-                                 (funcall (magpt-task-render-fn task) out data)
-                                 (when (magpt-task-apply-fn task)
-                                   (funcall (magpt-task-apply-fn task) out data)))
-                             (error
-                              (magpt--log "task-callback exception: %s" (error-message-string cerr))
-                              (magpt--log "task-callback exception: signal=%S data=%S" (car-safe cerr) (cdr-safe cerr))
-                              (magpt--log "task-callback exception: BT:\n%s" (magpt--backtrace-string))
-                              (message "%s" (magpt--i18n 'callback-error (error-message-string cerr)))))))))
-                  (error
-                   (magpt--log "gptel-request error for %s: %s\nBT:\n%s"
-                               (magpt-task-name task)
-                               (error-message-string gerr)
-                               (magpt--backtrace-string))
-                   (message "%s" (magpt--i18n 'gptel-error (error-message-string gerr)))))))))
-        (error
-         (let* ((emsg (condition-case _ (error-message-string magpt--e)
-                        (error "<no-error-object>")))
-                (esym (car-safe magpt--e))
-                (edata (cdr-safe magpt--e)))
-           (magpt--log "run-task exception: %s" emsg)
-           (magpt--log "run-task exception: signal=%S data=%S" esym edata)
-           (magpt--log "run-task exception: BT:\n%s" (magpt--backtrace-string))
-           (message "%s" (magpt--i18n 'callback-error emsg)))))))
+          (when (magpt--task-confirm-send task bytes)
+            (magpt--task-dispatch task prompt data bytes))))
+    (error
+     (magpt--handle-run-task-exception e))))
 
 ;;;###autoload
 (defun magpt-run-task (name &optional ctx)
@@ -466,6 +549,25 @@ user RC changed since the last call."
 (defvar magpt-history-changed-hook nil
   "Hook run after a history entry is appended.
 UI modules (e.g., Magit overview) can subscribe to refresh themselves.")
+
+(defun magpt--history-append-error-safe (task request emsg)
+  "Append an error entry to history safely (no throw if history is not ready).
+TASK is a symbol; REQUEST is a string; EMSG is an error string."
+  (condition-case _e
+      (progn
+        ;; Ensure history feature/variable exist
+        (unless (boundp 'magpt--history-entries)
+          (require 'magpt-history nil t)
+          (unless (boundp 'magpt--history-entries)
+            (defvar magpt--history-entries nil)))
+        (when (fboundp 'magpt--history-append-entry)
+          (magpt--history-append-entry task (or request "") ""
+                                       "Error: see :error"
+                                       :valid nil :error (or emsg ""))))
+    (error
+     ;; Last resort: just log; avoid rethrowing inside callbacks.
+     (magpt--log "history-append-error-safe: could not append error for %s: %s"
+                 task emsg))))
 
 (require 'magpt-history) ;; AI history storage (entries, append, search)
 
@@ -506,6 +608,8 @@ In compact mode, long lists are truncated (with hints) and spacing is reduced."
   (ignore-errors (remove-hook 'magpt-history-changed-hook #'magpt--refresh-magit-status-visible))
   (ignore-errors (remove-hook 'magpt-history-changed-hook #'magpt--ai-actions-history-updated))
   (ignore-errors (remove-hook 'magit-status-sections-hook #'magpt-magit-insert-ai-overview))
+  ;; Also remove 'extras' section if it was enabled earlier, чтобы она не всплывала сверху.
+  (ignore-errors (remove-hook 'magit-status-sections-hook #'magpt-overview-extras-insert))
   ;; Debug advices (if were enabled)
   (when (fboundp 'advice-remove)
     (ignore-errors (advice-remove 'magit-refresh #'magpt--log-magit-refresh))
@@ -565,6 +669,12 @@ Use when transient/ui ломается после пересборки или ev
     (when (and (featurep 'magit) (fboundp 'magit-refresh))
       (run-at-time 0 nil (lambda () (ignore-errors (magit-refresh)))))
     (message "magpt: restarted")))
+
+;; Ensure logging and stability wrappers are loaded early.
+(require 'magpt-log)
+(require 'magpt-stability)
+;; Extras module is available but not required by default to avoid extra top section.
+;; Enable explicitly if needed: (require 'magpt-overview-extras)
 
 (provide 'magpt)
 

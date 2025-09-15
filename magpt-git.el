@@ -13,6 +13,7 @@
 
 (require 'subr-x)
 (require 'seq)
+(require 'magpt-log nil t)
 
 ;; External deps from core (magpt.el)
 (declare-function magpt--log "ext:magpt" (fmt &rest args))

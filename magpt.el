@@ -61,13 +61,20 @@
 (require 'magpt-gpt nil t)
 (require 'magpt-git nil t)
 
+;; Ensure the logging toggle exists early so submodules that are loaded
+;; before the full customization block do not see an unbound variable.
+;; The long-form defcustom remains later to support customization UI;
+;; this defvar merely ensures the variable is bound early (default: t).
+(defvar magpt-log-enabled t
+  "Non-nil enables diagnostic logging for magpt (early declaration).")
+
 (declare-function magit-toplevel "ext:magit")
 (declare-function magit-commit-create "ext:magit")
 (declare-function transient-quit-all "ext:transient")
-(defvar transient--prefix) ;; from transient
 (declare-function magpt--recent-git-output-get "magpt-git" (dir))
 (declare-function magpt--git-apply-temp "magpt-git" (dir patch &rest args))
 (declare-function magpt--git-apply-check-temp "magpt-git" (dir patch &rest args))
+(eval-when-compile (defvar transient--prefix))
 
 ;;;; Section: Feature flags and “public” groups
 ;;
@@ -365,7 +372,7 @@ user RC changed since the last call."
               (magpt-task-name task)
               (buffer-name)
               (ignore-errors (magpt--project-root)))
-  (condition-case err
+  (condition-case magpt--e
       (pcase-let* ((`(,data ,_preview ,bytes)
                     (progn
                       (magpt--log "run-task: %s collecting context..." (magpt-task-name task))
@@ -418,10 +425,14 @@ user RC changed since the last call."
                                (magpt--backtrace-string))
                    (message "%s" (magpt--i18n 'gptel-error (error-message-string gerr)))))))))
         (error
-         (magpt--log "run-task exception: %s" (error-message-string err))
-         (magpt--log "run-task exception: signal=%S data=%S" (car-safe err) (cdr-safe err))
-         (magpt--log "run-task exception: BT:\n%s" (magpt--backtrace-string))
-         (message "%s" (magpt--i18n 'callback-error (error-message-string err)))))))
+         (let* ((emsg (condition-case _ (error-message-string magpt--e)
+                        (error "<no-error-object>")))
+                (esym (car-safe magpt--e))
+                (edata (cdr-safe magpt--e)))
+           (magpt--log "run-task exception: %s" emsg)
+           (magpt--log "run-task exception: signal=%S data=%S" esym edata)
+           (magpt--log "run-task exception: BT:\n%s" (magpt--backtrace-string))
+           (message "%s" (magpt--i18n 'callback-error emsg)))))))
 
 ;;;###autoload
 (defun magpt-run-task (name &optional ctx)

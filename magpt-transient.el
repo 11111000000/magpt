@@ -18,7 +18,7 @@
 (require 'transient nil t)
 (require 'magpt-history nil t)
 ;; transient--prefix is defined by Transient; don't bind it here to avoid unbinding on unload.
-(defvar magpt-log-enabled nil)
+;; Do not force logging off here; use a permissive default so core defcustom can take over.
 (declare-function magpt--log "ext:magpt" (fmt &rest args))
 
 ;; Forward declarations (silence byte-compiler; implementations in other modules).

@@ -21,7 +21,6 @@
 
 (defvar magpt-model)
 (defvar gptel-model)
-(defvar magpt-log-enabled)
 (defvar magpt-info-language)
 (defvar magpt-commit-language)
 

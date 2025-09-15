@@ -67,14 +67,29 @@
     (_ (format "%s" task))))
 
 (defun magpt-overview-extras--entry->summary (entry)
+  "Return a short summary string for ENTRY, trying several known fields.
+Prefer :summary if present, otherwise try to parse a JSON :summary from
+:response (most history entries store the raw model output in :response).
+Fall back to :raw for older entries, or show an error note when entry is invalid."
   (let* ((valid (plist-get entry :valid))
-         (summary (plist-get entry :summary))
+         (summary
+          ;; 1) explicit :summary field
+          (or (plist-get entry :summary)
+              ;; 2) try to parse :response (preferred new key)
+              (let ((resp (plist-get entry :response)))
+                (when (and (stringp resp) (> (length (string-trim resp)) 0))
+                  (let ((obj (magpt-overview-extras--json->plist resp)))
+                    (when obj
+                      (let ((s (plist-get obj :summary)))
+                        (and (stringp s) s))))))))
          (raw (plist-get entry :raw)))
     (or summary
+        ;; 3) legacy :raw field
         (when raw
           (let* ((obj (magpt-overview-extras--json->plist raw))
                  (s (plist-get obj :summary)))
             (and (stringp s) s)))
+        ;; 4) if entry marked invalid, show its error
         (and (not valid)
              (let ((e (plist-get entry :error)))
                (and (stringp e) (format "Ошибка: %s" e)))))))

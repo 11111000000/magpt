@@ -673,9 +673,18 @@ Use when transient/ui ломается после пересборки или ev
 ;; Ensure logging and stability wrappers are loaded early.
 (require 'magpt-log)
 (require 'magpt-stability)
+(defcustom magpt-overview-extras-enabled nil
+  "If non-nil, insert extra AI overview cards (\"More\") in magit-status."
+  :type 'boolean
+  :group 'magpt)
 (require 'magpt-overview-extras nil t)
-(when (fboundp 'magpt-overview-extras-enable)
-  (magpt-overview-extras-enable))
+(if (and magpt-overview-extras-enabled
+         (fboundp 'magpt-overview-extras-enable))
+    (magpt-overview-extras-enable)
+  ;; Ensure the extras section is not shown when disabled (remove hook if present).
+  (when (fboundp 'magpt-overview-extras-insert)
+    (ignore-errors
+      (remove-hook 'magit-status-sections-hook #'magpt-overview-extras-insert))))
 
 (provide 'magpt)
 

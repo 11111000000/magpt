@@ -12,6 +12,7 @@
 (require 'magit nil t)
 (require 'magpt-log)
 (require 'magpt-history nil t)
+(require 'magpt-ui-icons nil t)
 (declare-function magpt--i18n "ext:magpt" (key &rest args))
 
 (defgroup magpt-overview-extras nil
@@ -55,17 +56,35 @@
              :test #'eq)))
 
 (defun magpt-overview-extras--task-title (task)
-  "Return localized title for TASK using magpt i18n keys."
+  "Return localized title for TASK using magpt i18n keys (with emoji prefix when enabled)."
   (pcase task
-    ('explain-undo-commits  (magpt--i18n 'overview-card-undo-commits))
-    ('explain-stash         (magpt--i18n 'overview-card-stash))
-    ('explain-branches      (magpt--i18n 'overview-card-branches))
-    ('explain-push-pull     (magpt--i18n 'overview-card-push-pull))
-    ('reset-files-suggest   (magpt--i18n 'overview-card-reset-files))
-    ('restore-file-suggest  (magpt--i18n 'overview-card-restore-file))
-    ('explain-reflog-rescue (magpt--i18n 'overview-card-reflog-rescue))
-    ('explain-detached-head (magpt--i18n 'overview-card-detached-head))
-    ('explain-set-upstream  (magpt--i18n 'overview-card-set-upstream))
+    ('explain-undo-commits
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'undo-commits))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-undo-commits))))
+    ('explain-stash
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'stash))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-stash))))
+    ('explain-branches
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'branches-overview))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-branches))))
+    ('explain-push-pull
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'push-pull))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-push-pull))))
+    ('reset-files-suggest
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'reset-files))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-reset-files))))
+    ('restore-file-suggest
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'restore-file))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-restore-file))))
+    ('explain-reflog-rescue
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'reflog-rescue))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-reflog-rescue))))
+    ('explain-detached-head
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'detached-head))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-detached-head))))
+    ('explain-set-upstream
+     (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'set-upstream))))
+       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-card-set-upstream))))
     (_ (format "%s" task))))
 
 (defun magpt-overview-extras--entry->summary (entry)

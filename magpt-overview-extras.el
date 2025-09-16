@@ -97,13 +97,12 @@ Fall back to :raw for older entries, or show an error note when entry is invalid
 (defun magpt-overview-extras--insert-card (task entry)
   (let* ((title (magpt-overview-extras--task-title task))
          (summary (or (magpt-overview-extras--entry->summary entry) "")))
-    (insert (propertize (format "  • %s\n" title) 'face 'magit-section-heading))
-    (when (> (length summary) 0)
-      (let ((short (if (> (length summary) 240)
-                       (concat (substring summary 0 237) "…")
-                     summary)))
-        (insert (format "    %s\n" short))))
-    (insert "\n")))
+    (magit-insert-section (magit-section 'magpt-extra-card task)
+      (magit-insert-heading (format "  • %s" title))
+      (when (> (length summary) 0)
+        (dolist (ln (split-string summary "\n"))
+          (insert "    " ln "\n")))
+      (insert "\n"))))
 
 (defun magpt-overview-extras--have-explain-status? ()
   (let ((e (magpt-overview-extras--last-entry 'explain-status)))
@@ -115,20 +114,25 @@ Fall back to :raw for older entries, or show an error note when entry is invalid
              (boundp 'magpt--history-entries)
              magpt--history-entries)
     (let ((inserted 0))
-      (insert (propertize "AI-обзор (дополнительно)\n" 'face 'magit-section-heading))
-      ;; Hint about [. g] only if main explain-status is missing.
-      (when (not (magpt-overview-extras--have-explain-status?))
-        (insert (propertize "  (Рекомендуется запустить [. g] для сводки статуса.)\n\n"
-                            'face 'magit-dimmed)))
-      (dolist (task magpt-overview-extra-tasks)
-        (when (< inserted magpt-overview-extras-max-cards)
-          (let ((entry (magpt-overview-extras--last-entry task)))
-            (when (and entry (plist-get entry :valid))
-              (magpt-overview-extras--insert-card task entry)
-              (cl-incf inserted)))))
-      (when (= inserted 0)
-        (insert (propertize "  (Пока нет данных по дополнительным задачам)\n\n"
-                            'face 'magit-dimmed))))))
+      (magit-insert-section (magit-section 'magpt-overview-extras)
+        (magit-insert-heading "Ещё")
+        ;; Hint about [. g] only if main explain-status is missing.
+        (when (not (magpt-overview-extras--have-explain-status?))
+          (insert (propertize "  (Рекомендуется запустить [. g] для сводки статуса.)\n\n"
+                              'face 'magit-dimmed)))
+        ;; Make each card collapsible and hidden by default.
+        (let ((magit-section-initial-visibility-alist
+               (cons (cons 'magpt-extra-card 'hide)
+                     magit-section-initial-visibility-alist)))
+          (dolist (task magpt-overview-extra-tasks)
+            (when (< inserted magpt-overview-extras-max-cards)
+              (let ((entry (magpt-overview-extras--last-entry task)))
+                (when (and entry (plist-get entry :valid))
+                  (magpt-overview-extras--insert-card task entry)
+                  (cl-incf inserted))))))
+        (when (= inserted 0)
+          (insert (propertize "  (Пока нет данных по дополнительным задачам)\n\n"
+                              'face 'magit-dimmed)))))))
 
 ;; Hook into Magit status render
 (defvar magpt-overview-extras--hook-added nil)

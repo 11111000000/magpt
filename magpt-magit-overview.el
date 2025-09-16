@@ -245,8 +245,7 @@ history changes (no need for the user to press \"g\")."
            (ss (if max-s (seq-take sugs max-s) sugs))
            (i 1))
       (magit-insert-section (magit-section 'magpt-ai-explain-suggestions)
-        (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'suggestions))))
-          (magit-insert-heading (concat (if (and ic (> (length ic) 0)) (concat ic " ") "") (magpt--i18n 'overview-suggestions))))
+        (magit-insert-heading (concat "🟢 " (magpt--i18n 'overview-suggestions)))
         (let ((magit-section-initial-visibility-alist
                (cons (cons 'magpt-ai-suggestion 'show)
                      magit-section-initial-visibility-alist)))
@@ -261,12 +260,10 @@ history changes (no need for the user to press \"g\")."
                    (first-cmd (or git-cmd (car cmds))))
               (magit-insert-section (magit-section 'magpt-ai-suggestion (list :index i :data s))
                 (magit-insert-heading
-                  (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'suggestion-default))))
-                    (format "  %d) %s%s%s"
-                            i
-                            (if (and ic (> (length ic) 0)) (concat ic " ") "")
-                            title
-                            (if keys-str (format " [%s]" keys-str) ""))))
+                  (format "  %d) 🟢 %s%s"
+                          i
+                          title
+                          (if keys-str (format " [%s]" keys-str) "")))
                 (when (and (stringp first-cmd) (> (length first-cmd) 0))
                   (let ((cmdline (format "      $ %s" first-cmd)))
                     (insert (propertize cmdline 'face 'magpt-console-face))
@@ -445,7 +442,7 @@ Card shows summary and first command; falls back to raw response."
                        (git-cmd (and cmds (seq-find (lambda (c) (string-prefix-p "git " c)) cmds)))
                        (first-cmd (or git-cmd (car cmds))))
                   ;; Title + keys
-                  (insert (format "  %d) %s%s\n" i title (if keys-str (format " [%s]" keys-str) "")))
+                  (insert (format "  %d) 🟢 %s%s\n" i title (if keys-str (format " [%s]" keys-str) "")))
                   ;; First command with Eshell button
                   (when (stringp first-cmd)
                     (let ((cmdline (format "      $ %s" first-cmd)))
@@ -483,7 +480,14 @@ Card shows summary and first command; falls back to raw response."
   "Insert overview heading; log current history size."
   ;; Ensure a blank line above the overview heading for visual separation.
   (insert "\n")
-  (magit-insert-heading (magpt--i18n 'overview-title))
+  (let* ((ic (and (fboundp 'magpt--icon)
+                  (let ((x (magpt--icon 'ai-overview)))
+                    (if (and (stringp x) (> (length x) 0))
+                        x
+                      (magpt--icon 'suggestion-default))))))
+    (magit-insert-heading
+      (concat (if (and ic (> (length ic) 0)) (concat ic " ") "")
+              (magpt--i18n 'overview-title))))
   (when (fboundp 'magpt--log)
     (magpt--log "overview: insert begin; entries=%d"
                 (length (or (and (boundp 'magpt--history-entries) magpt--history-entries) '())))))

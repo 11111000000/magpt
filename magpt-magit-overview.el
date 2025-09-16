@@ -43,6 +43,11 @@ Uses Magit's save/restore helpers when available."
   :type 'boolean
   :group 'magpt)
 
+(defface magpt-console-face
+  '((t :background "black" :foreground "#e6e6e6" :extend t))
+  "Face for console-like command examples in Magpt overview."
+  :group 'magpt)
+
 ;; Forward declarations from magpt.el (to silence byte-compiler).
 (declare-function magpt--history-last-entry-for "magpt-history" (task))
 (declare-function magpt--entry-parse-json-safe "magpt-history" (entry))
@@ -233,7 +238,7 @@ history changes (no need for the user to press \"g\")."
       (magit-insert-section (magit-section 'magpt-ai-explain-suggestions)
         (magit-insert-heading (magpt--i18n 'overview-suggestions))
         (let ((magit-section-initial-visibility-alist
-               (cons (cons 'magpt-ai-suggestion 'hide)
+               (cons (cons 'magpt-ai-suggestion 'show)
                      magit-section-initial-visibility-alist)))
           (dolist (s ss)
             (let* ((title (or (alist-get 'title s) (format "Suggestion %d" i)))
@@ -250,7 +255,9 @@ history changes (no need for the user to press \"g\")."
                           i title
                           (if keys-str (format " [%s]" keys-str) "")))
                 (when (and (stringp first-cmd) (> (length first-cmd) 0))
-                  (insert (format "      $ %s\n" first-cmd))
+                  (let ((cmdline (format "      $ %s" first-cmd)))
+                    (insert (propertize cmdline 'face 'magpt-console-face))
+                    (insert "\n"))
                   (insert "      ")
                   (insert-text-button "[Eshell]"
                                       'action #'magpt--btn-eshell-insert
@@ -386,7 +393,9 @@ Card shows summary and first command; falls back to raw response."
                     (insert "  " ln "\n")))
                 (when (stringp cmd)
                   (insert "\n")
-                  (insert (format "      $ %s\n" cmd))
+                  (let ((cmdline (format "      $ %s" cmd)))
+                    (insert (propertize cmdline 'face 'magpt-console-face))
+                    (insert "\n"))
                   (insert "      ")
                   (insert-text-button "[Eshell]"
                                       'action #'magpt--btn-eshell-insert
@@ -412,7 +421,9 @@ Card shows summary and first command; falls back to raw response."
 
 (defun magpt--ai-overview--insert-heading-and-toggle ()
   "Insert parent heading and toggle line; log current history size."
-  (magit-insert-heading (magpt--i18n 'overview-title))
+  ;; Ensure a blank line above the overview heading for visual separation.
+  (insert "\n")
+  (insert (format "  %s\n" (magpt--i18n 'overview-title)))
   (magpt--overview--insert-toggle-line)
   (when (fboundp 'magpt--log)
     (magpt--log "overview: insert begin; entries=%d"

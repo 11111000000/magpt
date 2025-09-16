@@ -97,7 +97,7 @@
     (overview-card-reflog-rescue . "Reflog rescue")
     (overview-card-detached-head . "Detached HEAD help")
     (overview-card-set-upstream . "Set upstream help")
-    (overview-no-data . "(no data - press [. g] to refresh)")
+    (overview-no-data . "(no data)")
     (overview-stale . "(status changed - press [. g] to refresh)")
     (patch-opened . "Opened response in patch buffer")
     ;; Transient/AI Actions UI
@@ -167,7 +167,7 @@
     (overview-card-reflog-rescue . "Reflog — спасение")
     (overview-card-detached-head . "Detached HEAD — помощь")
     (overview-card-set-upstream . "Upstream — настройка")
-    (overview-no-data . "(нет данных - нажмите [. g] для обновления)")
+    (overview-no-data . "(нет данных)")
     (overview-stale . "(статус изменился - нажмите [. g] для обновления)")
     (patch-opened . "Патч открыт в буфере")
     ;; Transient/AI Actions UI
@@ -229,7 +229,7 @@
     (overview-card-branches . "Aperçu des branches")
     (overview-card-restore-file . "Restaurer un fichier (guide)")
     (overview-card-reset-files . "Réinitialiser des fichiers (guide)")
-    (overview-no-data . "(aucune donnée — appuyez sur [. g] pour actualiser)")
+    (overview-no-data . "(aucune donnée)")
     (overview-stale . "(état modifié — appuyez sur [. g] pour actualiser)")
     (patch-opened . "Patch ouvert dans un tampon")
     ;; Transient/AI Actions UI
@@ -291,7 +291,7 @@
     (overview-card-branches . "分支概览")
     (overview-card-restore-file . "恢复文件（指南）")
     (overview-card-reset-files . "重置文件（指南）")
-    (overview-no-data . "(没有数据 — 按 [. g] 刷新)")
+    (overview-no-data . "(没有数据)")
     (overview-stale . "(状态已更改 — 按 [. g] 刷新)")
     (patch-opened . "已在补丁缓冲区中打开响应")
     ;; Transient/AI Actions UI
@@ -352,7 +352,7 @@
     (overview-card-branches . "Огляд гілок")
     (overview-card-restore-file . "Відновити файл (інструкція)")
     (overview-card-reset-files . "Скинути файли (інструкція)")
-    (overview-no-data . "(немає даних — натисніть [. g] для оновлення)")
+    (overview-no-data . "(немає даних)")
     (overview-stale . "(стан змінився — натисніть [. g] для оновлення)")
     (patch-opened . "Відповідь відкрито в буфері патчу")
     ;; Transient/AI Actions UI
@@ -413,7 +413,7 @@
     (overview-card-branches . "Агляд галінаў")
     (overview-card-restore-file . "Аднавіць файл (інструкцыя)")
     (overview-card-reset-files . "Скінуць файлы (інструкцыя)")
-    (overview-no-data . "(няма даных — націсніце [. g] для абнаўлення)")
+    (overview-no-data . "(няма даных)")
     (overview-stale . "(стан змяніўся — націсніце [. g] для абнаўлення)")
     (patch-opened . "Адказ адкрыты ў буферы патча")
     ;; Transient/AI Actions UI

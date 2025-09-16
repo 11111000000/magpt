@@ -291,7 +291,9 @@
     (ai-no-shell-cmd . "此建议中没有 shell 命令")
     (ai-eshell-helper-missing . "magpt：eshell 帮助不可用（未加载 magpt-apply）")
     (ai-eshell-inserted . "magpt：命令已插入到 eshell")
-    (ai-actions-reloaded . "magpt：AI 操作已从概览重新加载")))
+    (ai-actions-reloaded . "magpt：AI 操作已从概览重新加载")
+    (task-done-json-ok . "magpt：%s 已完成（JSON 有效） — 请查看 AI 概览")
+    (task-done-not-json . "magpt：%s 已完成，但响应不是 JSON — 打开 JSON 检查")))
 
 ;; Ukrainian
 (defconst magpt--i18n-uk
@@ -347,7 +349,9 @@
     (ai-no-shell-cmd . "У цій пропозиції немає команди оболонки")
     (ai-eshell-helper-missing . "magpt: помічник eshell недоступний (magpt-apply не завантажено)")
     (ai-eshell-inserted . "magpt: команду вставлено в eshell")
-    (ai-actions-reloaded . "magpt: дії ШІ перезавантажено з огляду")))
+    (ai-actions-reloaded . "magpt: дії ШІ перезавантажено з огляду")
+    (task-done-json-ok . "magpt: %s виконано (JSON OK) — див. AI‑огляд")
+    (task-done-not-json . "magpt: %s виконано, але відповідь не є JSON — відкрийте JSON для перевірки")))
 
 ;; Belarusian
 (defconst magpt--i18n-be
@@ -403,13 +407,21 @@
     (ai-no-shell-cmd . "У гэтай прапанове няма каманды абалонкі")
     (ai-eshell-helper-missing . "magpt: памочнік eshell недаступны (magpt-apply не загружаны)")
     (ai-eshell-inserted . "magpt: каманда ўстаўлена ў eshell")
-    (ai-actions-reloaded . "magpt: дзеянні ШІ перазагружаны з агляду")))
+    (ai-actions-reloaded . "magpt: дзеянні ШІ перазагружаны з агляду")
+    (task-done-json-ok . "magpt: %s выканана (JSON OK) — гл. AI-агляд")
+    (task-done-not-json . "magpt: %s выканана, але адказ не з'яўляецца JSON — адкрыйце JSON для праверкі")))
 
 (defun magpt--i18n (key &rest args)
   "Format localized message for KEY with ARGS using `magpt-info-language'.
 Never signal an error; fall back to a plain format string if formatting fails."
-  ;; Do not force RC loading from here; interactive entry points call magpt--maybe-load-rc
-  ;; before user-visible actions. This avoids void-variable during partial reloads.
+  ;; Best-effort: try to load user/project RC early so the language choice
+  ;; (`magpt-info-language`) is respected during early UI rendering (e.g. Magit
+  ;; overview at startup). This is silent and protected so it is safe when the
+  ;; magpt core has not been fully initialized (e.g., during byte-compile or
+  ;; partial reloads).
+  (ignore-errors
+    (when (fboundp 'magpt--maybe-load-rc)
+      (magpt--maybe-load-rc)))
   (let* ((lang (magpt--lang-code))
          (tbl (pcase lang
                 ('ru magpt--i18n-ru)

@@ -673,7 +673,6 @@ Use when transient/ui ломается после пересборки или ev
 ;; Ensure logging and stability wrappers are loaded early.
 (require 'magpt-log)
 (require 'magpt-stability)
-;; Enable extras: collapsible "Ещё" section with additional cards at the bottom.
 (require 'magpt-overview-extras nil t)
 (when (fboundp 'magpt-overview-extras-enable)
   (magpt-overview-extras-enable))

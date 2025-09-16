@@ -12,6 +12,7 @@
 (require 'magit nil t)
 (require 'magpt-log)
 (require 'magpt-history nil t)
+(declare-function magpt--i18n "ext:magpt" (key &rest args))
 
 (defgroup magpt-overview-extras nil
   "Extra AI overview cards."
@@ -54,16 +55,17 @@
              :test #'eq)))
 
 (defun magpt-overview-extras--task-title (task)
+  "Return localized title for TASK using magpt i18n keys."
   (pcase task
-    ('explain-undo-commits "Отмена коммитов (reset vs revert)")
-    ('explain-stash        "Stash: push/apply/pop/branch")
-    ('explain-branches     "Ветви: обзор и работа")
-    ('explain-push-pull    "Push/Pull: рекомендации")
-    ('reset-files-suggest  "Сброс файлов: варианты")
-    ('restore-file-suggest "Восстановление файла")
-    ('explain-reflog-rescue "Reflog: спасение")
-    ('explain-detached-head "Detached HEAD: помощь")
-    ('explain-set-upstream  "Upstream: настройка")
+    ('explain-undo-commits  (magpt--i18n 'overview-card-undo-commits))
+    ('explain-stash         (magpt--i18n 'overview-card-stash))
+    ('explain-branches      (magpt--i18n 'overview-card-branches))
+    ('explain-push-pull     (magpt--i18n 'overview-card-push-pull))
+    ('reset-files-suggest   (magpt--i18n 'overview-card-reset-files))
+    ('restore-file-suggest  (magpt--i18n 'overview-card-restore-file))
+    ('explain-reflog-rescue (magpt--i18n 'overview-card-reflog-rescue))
+    ('explain-detached-head (magpt--i18n 'overview-card-detached-head))
+    ('explain-set-upstream  (magpt--i18n 'overview-card-set-upstream))
     (_ (format "%s" task))))
 
 (defun magpt-overview-extras--entry->summary (entry)
@@ -110,15 +112,13 @@ Fall back to :raw for older entries, or show an error note when entry is invalid
 
 (defun magpt-overview-extras-insert ()
   "Insert extra AI overview cards into Magit Status buffer."
-  (when (and (derived-mode-p 'magit-status-mode)
-             (boundp 'magpt--history-entries)
-             magpt--history-entries)
+  (when (derived-mode-p 'magit-status-mode)
     (let ((inserted 0))
       (magit-insert-section (magit-section 'magpt-overview-extras)
-        (magit-insert-heading "Ещё")
+        (magit-insert-heading (magpt--i18n 'overview-extras-title))
         ;; Hint about [. g] only if main explain-status is missing.
         (when (not (magpt-overview-extras--have-explain-status?))
-          (insert (propertize "  (Рекомендуется запустить [. g] для сводки статуса.)\n\n"
+          (insert (propertize (concat "  " (magpt--i18n 'overview-extras-hint-dot-g) "\n\n")
                               'face 'magit-dimmed)))
         ;; Make each card collapsible and hidden by default.
         (let ((magit-section-initial-visibility-alist
@@ -131,7 +131,7 @@ Fall back to :raw for older entries, or show an error note when entry is invalid
                   (magpt-overview-extras--insert-card task entry)
                   (cl-incf inserted))))))
         (when (= inserted 0)
-          (insert (propertize "  (Пока нет данных по дополнительным задачам)\n\n"
+          (insert (propertize (concat "  " (magpt--i18n 'overview-extras-no-data) "\n\n")
                               'face 'magit-dimmed)))))))
 
 ;; Hook into Magit status render

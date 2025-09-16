@@ -260,7 +260,7 @@ history changes (no need for the user to press \"g\")."
                    (first-cmd (or git-cmd (car cmds))))
               (magit-insert-section (magit-section 'magpt-ai-suggestion (list :index i :data s))
                 (magit-insert-heading
-                  (format "  %d) 🟢 %s%s"
+                  (format "  %d) %s%s"
                           i
                           title
                           (if keys-str (format " [%s]" keys-str) "")))
@@ -450,7 +450,7 @@ Card shows summary and first command; falls back to raw response."
                            (first-cmd (or git-cmd (car cmds))))
                       (magit-insert-section (magit-section 'magpt-ai-suggestion (list :index i :data s))
                         (magit-insert-heading
-                          (format "  %d) 🟢 %s%s" i title (if keys-str (format " [%s]" keys-str) "")))
+                          (format "  %d) %s%s" i title (if keys-str (format " [%s]" keys-str) "")))
                         ;; First command with Eshell button
                         (when (stringp first-cmd)
                           (let ((cmdline (format "      $ %s" first-cmd)))

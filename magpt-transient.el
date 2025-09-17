@@ -36,6 +36,7 @@
 (declare-function magpt-explain-stash "magpt-tasks-assist" ())
 (declare-function magpt-explain-detached-head "magpt-tasks-assist" ())
 (declare-function magpt-explain-set-upstream "magpt-tasks-assist" ())
+(declare-function magpt-ask-git "magpt-tasks-assist" ())
 (declare-function magpt--eshell-popup-insert "magpt-apply" (cmd))
 (declare-function magpt--i18n "ext:magpt" (key &rest args))
 ;; History API
@@ -73,6 +74,7 @@
             ("Stash guide" . "Руководство по stash")
             ("Detached HEAD help" . "Помощь по Detached HEAD")
             ("Set upstream help" . "Настроить upstream")
+            ("Ask any question about git" . "Задать вопрос про git")
             ("Reload from overview" . "Обновить из обзора"))))
     (if ru
         (or (cdr (assoc s table)) s)
@@ -166,6 +168,7 @@
 
 (defcustom magpt-ai-actions-source-tasks
   '(explain-status
+    ask-git
     explain-push-pull
     explain-branches
     restore-file-suggest
@@ -178,6 +181,7 @@
   "Tasks to source suggestions from for AI Actions.
 The newest valid entry among these tasks supplies summary and suggestions."
   :type '(repeat (choice (const explain-status)
+                         (const ask-git)
                          (const explain-push-pull)
                          (const explain-branches)
                          (const restore-file-suggest)
@@ -385,6 +389,8 @@ When the AI Actions transient is open, the UI is also reloaded."
        :description (lambda () (magpt--transient-desc "Detached HEAD help")))
       ("S" magpt-explain-set-upstream
        :description (lambda () (magpt--transient-desc "Set upstream help")))
+      ("?" magpt-ask-git
+       :description (lambda () (magpt--transient-desc "Ask any question about git")) )
       ("r" magpt-ai-actions-reload
        :description (lambda () (magpt--transient-desc "Reload from overview")))]]))
 

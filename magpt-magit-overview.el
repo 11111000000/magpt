@@ -483,6 +483,45 @@ Card shows summary and first command; falls back to raw response."
         (when (fboundp 'magpt--insert-entry-buttons)
           (magpt--insert-entry-buttons entry))))))
 
+(defun magpt--overview--insert-ask-card (ag)
+  "Insert Ask Git 'Answer' card for entry AG."
+  (when ag
+    (magit-insert-section (magit-section 'magpt-ai-card-ask-git)
+      (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'ask-question))))
+        (magit-insert-heading
+          (concat (if (and ic (> (length ic) 0)) (concat ic " ") "")
+                  (magpt--i18n 'overview-card-ask-git))))
+      (let ((magpt-ui-density 'compact))
+        (let ((data (magpt--overview--entry-data ag)))
+          (if data
+              (let* ((answer (or (alist-get 'answer data)
+                                 (alist-get 'summary data)))
+                     (sugs (alist-get 'suggestions data))
+                     (first-sug (and (listp sugs) (car sugs)))
+                     (cmds (and (listp first-sug) (alist-get 'commands first-sug)))
+                     (first-cmd (and (listp cmds) (car cmds))))
+                (when (stringp answer)
+                  (dolist (ln (split-string (string-trim-right answer) "\n"))
+                    (insert "  " ln "\n")))
+                (when (stringp first-cmd)
+                  (insert "\n")
+                  (let ((cmdline (format "      $ %s" first-cmd)))
+                    (insert (propertize cmdline 'face 'magpt-console-face))
+                    (insert "\n"))
+                  (insert "      ")
+                  (let ((label (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'eshell-button))))
+                                 (if (and ic (> (length ic) 0)) (format "[%s Eshell]" ic) "[Eshell]"))))
+                    (insert-text-button label
+                                        'action #'magpt--btn-eshell-insert
+                                        'follow-link t
+                                        'help-echo "Insert command into eshell (bottom popup)"
+                                        'magpt-command first-cmd)
+                    (insert "\n"))))
+            (insert (magpt--i18n 'overview-response) "\n")
+            (insert (string-trim-right (plist-get ag :response)) "\n\n")))
+        (when (fboundp 'magpt--insert-entry-buttons)
+          (magpt--insert-entry-buttons ag))))))
+
 (defun magpt--ai-overview--insert-heading-only ()
   "Insert overview heading; log current history size."
   ;; Ensure a blank line above the overview heading for visual separation.
@@ -502,6 +541,7 @@ Card shows summary and first command; falls back to raw response."
 (defun magpt--ai-overview--collect-entries ()
   "Collect latest entries for all cards used by the overview."
   (list :ex (magpt--history-last-entry-for 'explain-status)
+        :ag (magpt--history-last-entry-for 'ask-git)
         :cl (magpt--history-last-entry-for 'commit-lint-suggest)
         :bn (magpt--history-last-entry-for 'branch-name-suggest)
         :rc (magpt--history-last-entry-for 'resolve-conflict-here)
@@ -527,7 +567,8 @@ Card shows summary and first command; falls back to raw response."
 
 (defun magpt--ai-overview--insert-cards (entries)
   "Insert all child cards using ENTRIES plist."
-  (let ((cl (plist-get entries :cl))
+  (let ((ag (plist-get entries :ag))
+        (cl (plist-get entries :cl))
         (bn (plist-get entries :bn))
         (rc (plist-get entries :rc))
         (pp (plist-get entries :pp))
@@ -539,6 +580,7 @@ Card shows summary and first command; falls back to raw response."
         (rl (plist-get entries :rl))
         (dh (plist-get entries :dh))
         (su (plist-get entries :su)))
+    (magpt--overview--insert-ask-card ag)
     (magpt--overview--insert-commit-lint-card cl)
     (magpt--overview--insert-branch-name-card bn)
     (magpt--overview--insert-resolve-conflict rc)
@@ -570,7 +612,7 @@ Card shows summary and first command; falls back to raw response."
              (ex (plist-get entries :ex)))
         ;; Insert toggle only when there is something to expand (suggestions or any card).
         (let* ((has-cards (seq-some (lambda (k) (plist-get entries k))
-                                    '(:cl :bn :rc :pp :br :rs :rf :st :uc :rl :dh :su)))
+                                    '(:ag :cl :bn :rc :pp :br :rs :rf :st :uc :rl :dh :su)))
                (has-sugs (let* ((d (and ex (magpt--overview--entry-data ex)))
                                 (s (and d (alist-get 'suggestions d))))
                            (and (listp s) (> (length s) 0)))))

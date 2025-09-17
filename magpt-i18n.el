@@ -47,6 +47,7 @@
 ;; English
 (defconst magpt--i18n-en
   '((confirm-send-full . "magpt: Send staged diff to LLM (%d bytes)? ")
+    (ai-ask-prompt . "Ask Git question: ")
     ;; Titles and toggles
     (overview-title . "AI overview (magpt)")
     (overview-toggle-show . "[Show rationale/steps]")
@@ -91,6 +92,7 @@
     (overview-card-push-pull . "Push/Pull advice")
     (overview-card-branches . "Branches overview")
     (overview-card-restore-file . "Recover file (how-to)")
+    (overview-card-ask-git . "Answer")
     (overview-card-reset-files . "Reset files (how-to)")
     (overview-card-stash . "Stash guide")
     (overview-card-undo-commits . "Undo commits (reset vs revert)")
@@ -117,6 +119,7 @@
 ;; Russian
 (defconst magpt--i18n-ru
   '((confirm-send-full . "magpt: Отправить staged‑дифф в LLM (%d байт)? ")
+    (ai-ask-prompt . "Вопрос к Git: ")
     ;; Titles and toggles
     (overview-title . "AI-обзор (magpt)")
     (overview-toggle-show . "[Показать обоснование/шаги]")
@@ -161,6 +164,7 @@
     (overview-card-push-pull . "Push/Pull — советы")
     (overview-card-branches . "Обзор веток")
     (overview-card-restore-file . "Восстановить файл (инструкция)")
+    (overview-card-ask-git . "Ответ")
     (overview-card-reset-files . "Сброс файлов (инструкция)")
     (overview-card-stash . "Stash — руководство")
     (overview-card-undo-commits . "Отмена коммитов (reset vs revert)")
@@ -187,6 +191,7 @@
 ;; French (kept for compatibility)
 (defconst magpt--i18n-fr
   '((confirm-send-full . "magpt: Envoyer le diff indexé au LLM (%d octets) ? ")
+    (ai-ask-prompt . "Question Git : ")
     ;; Titles and toggles
     (overview-title . "Vue d'ensemble IA (magpt)")
     (overview-toggle-show . "[Afficher raisonnement/étapes]")
@@ -228,6 +233,7 @@
     (overview-card-push-pull . "Conseils Push/Pull")
     (overview-card-branches . "Aperçu des branches")
     (overview-card-restore-file . "Restaurer un fichier (guide)")
+    (overview-card-ask-git . "Réponse")
     (overview-card-reset-files . "Réinitialiser des fichiers (guide)")
     (overview-no-data . "(aucune donnée)")
     (overview-stale . "(état modifié — appuyez sur [. g] pour actualiser)")
@@ -249,6 +255,7 @@
 ;; Chinese (Simplified)
 (defconst magpt--i18n-zh
   '((confirm-send-full . "magpt：将已暂存的差异发送给 LLM（%d 字节）？ ")
+    (ai-ask-prompt . "Git 问题：")
     ;; Titles and toggles
     (overview-title . "AI 概览（magpt）")
     (overview-toggle-show . "[显示 理由/步骤]")
@@ -290,6 +297,7 @@
     (overview-card-push-pull . "Push/Pull 建议")
     (overview-card-branches . "分支概览")
     (overview-card-restore-file . "恢复文件（指南）")
+    (overview-card-ask-git . "回答")
     (overview-card-reset-files . "重置文件（指南）")
     (overview-no-data . "(没有数据)")
     (overview-stale . "(状态已更改 — 按 [. g] 刷新)")
@@ -310,6 +318,7 @@
 ;; Ukrainian
 (defconst magpt--i18n-uk
   '((confirm-send-full . "magpt: Надіслати проіндексований diff до LLM (%d байт)? ")
+    (ai-ask-prompt . "Питання до Git: ")
     ;; Titles and toggles
     (overview-title . "Огляд ШІ (magpt)")
     (overview-toggle-show . "[Показати обґрунтування/кроки]")
@@ -351,6 +360,7 @@
     (overview-card-push-pull . "Поради Push/Pull")
     (overview-card-branches . "Огляд гілок")
     (overview-card-restore-file . "Відновити файл (інструкція)")
+    (overview-card-ask-git . "Відповідь")
     (overview-card-reset-files . "Скинути файли (інструкція)")
     (overview-no-data . "(немає даних)")
     (overview-stale . "(стан змінився — натисніть [. g] для оновлення)")
@@ -371,6 +381,7 @@
 ;; Belarusian
 (defconst magpt--i18n-be
   '((confirm-send-full . "magpt: Адправіць праіндэксаваны diff у LLM (%d байт)? ")
+    (ai-ask-prompt . "Пытанне да Git: ")
     ;; Titles and toggles
     (overview-title . "Агляд ШІ (magpt)")
     (overview-toggle-show . "[Паказаць абгрунтаванне/крокі]")
@@ -412,6 +423,7 @@
     (overview-card-push-pull . "Парады Push/Pull")
     (overview-card-branches . "Агляд галінаў")
     (overview-card-restore-file . "Аднавіць файл (інструкцыя)")
+    (overview-card-ask-git . "Адказ")
     (overview-card-reset-files . "Скінуць файлы (інструкцыя)")
     (overview-no-data . "(няма даных)")
     (overview-stale . "(стан змяніўся — націсніце [. g] для абнаўлення)")

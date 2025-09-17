@@ -785,6 +785,16 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                   :render-fn  #'magpt--render-set-upstream
                   :apply-fn   nil
                   :confirm-send? t))
+    ;; Ask Git (free-form question about current repo)
+    (magpt-register-task
+     (magpt--task :name 'ask-git
+                  :title "Ask a question about this repo"
+                  :scope 'repo
+                  :context-fn #'magpt--ctx-ask-git
+                  :prompt-fn  #'magpt--prompt-ask-git
+                  :render-fn  #'magpt--render-ask-git
+                  :apply-fn   nil
+                  :confirm-send? t))
     (setq magpt--assist-tasks-registered t)))
 
 (defun magpt--ensure-assist-ready ()
@@ -1208,6 +1218,97 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
   (interactive)
   (magpt--ensure-assist-ready)
   (magpt-run-task 'explain-set-upstream))
+
+;; ---- Ask Git (free-form QA) -------------------------------------------------
+
+(defun magpt--ctx-ask-git (ctx)
+  "Collect context for 'ask-git'. CTX should contain :question."
+  (let* ((q (or (plist-get ctx :question) "")))
+    (when (or (null q) (string-empty-p (string-trim q)))
+      (user-error "Empty question"))
+    (let* ((root (magpt--project-root))
+           (status-sb (ignore-errors (magpt--git root "status" "-sb")))
+           (porcelain (ignore-errors (magpt--git root "status" "--porcelain")))
+           (recent (magpt--recent-git-output-get root))
+           (recent-trunc (string-join (last (split-string (or recent "") "\n" t) 42) "\n"))
+           (keys (when magpt-include-magit-keys-in-suggestions
+                   (magpt--format-magit-keys-cheatsheet-safe)))
+           (preview (string-join
+                     (delq nil
+                           (list
+                            (format "QUESTION:\n%s" q)
+                            (and status-sb (format "\n\nSTATUS -sb:\n%s" status-sb))
+                            (and porcelain (format "\n\nPORCELAIN:\n%s"
+                                                   (string-join (seq-take (split-string porcelain "\n" t) 200) "\n")))
+                            (and (and keys (> (length keys) 0))
+                                 (format "\n\nMAGIT KEYS:\n%s"
+                                         (string-join (seq-take (split-string keys "\n" t) 50) "\n")))
+                            (and (> (length recent-trunc) 0)
+                                 (format "\n\nRECENT GIT OUTPUT:\n%s" recent-trunc))))
+                     ""))
+           (bytes (magpt--string-bytes preview)))
+      (list (list :question q
+                  :status-sb status-sb
+                  :porcelain porcelain
+                  :recent recent-trunc
+                  :magit-keys keys)
+            preview bytes))))
+
+(defun magpt--prompt-ask-git (data)
+  "Build prompt for 'ask-git' using DATA (:question :status-sb :porcelain :recent :magit-keys)."
+  (let* ((ilang (or magpt-info-language "English"))
+         (q (or (plist-get data :question) ""))
+         (sb (or (plist-get data :status-sb) ""))
+         (porc (or (plist-get data :porcelain) ""))
+         (recent (or (plist-get data :recent) ""))
+         (keys (plist-get data :magit-keys))
+         (keys-block
+          (if (and keys (stringp keys) (> (length keys) 0))
+              (format "\nUse ONLY the Magit key bindings listed below when populating suggestions[].keys; otherwise use [].\n--- BEGIN MAGIT KEYS HELP ---\n%s\n--- END MAGIT KEYS HELP ---\n" keys)
+            "\nIf relevant Magit key bindings are known, include them in suggestions[].keys; otherwise use [].\n")))
+    (format (concat
+             "You are an expert Git assistant. Answer the user's question about the CURRENT repository.\n"
+             "Use the provided STATUS, PORCELAIN, RECENT GIT OUTPUT and MAGIT KEYS to ground your answer.\n"
+             "Preferred output: JSON with fields\n"
+             "  { answer: string,\n"
+             "    suggestions: [ { title: string, commands: string[], keys: string[] } ],\n"
+             "    notes: string }\n"
+             "If JSON is difficult for this case, you may return plain text. Answer STRICTLY in %s.\n"
+             "%s"
+             "\n--- QUESTION ---\n%s\n--- END QUESTION ---\n\n"
+             "--- STATUS -sb ---\n%s\n--- END STATUS ---\n\n"
+             "--- PORCELAIN ---\n%s\n--- END PORCELAIN ---\n\n"
+             "%s")
+            ilang
+            keys-block
+            q sb porc
+            (if (> (length recent) 0)
+                (format "--- RECENT GIT OUTPUT ---\n%s\n--- END RECENT GIT OUTPUT ---\n" recent)
+              ""))))
+
+(defun magpt--render-ask-git (resp _data)
+  "Append Ask Git answer RESP to history with a short summary."
+  (let* ((obj (ignore-errors (json-parse-string (or resp "") :object-type 'alist :array-type 'list)))
+         (ans (and obj (alist-get 'answer obj)))
+         (summary (cond
+                   ((and (stringp ans) (> (length ans) 0)) ans)
+                   ((and obj (alist-get 'summary obj)) (alist-get 'summary obj))
+                   (t nil)))
+         (sum-short (and (stringp summary)
+                         (substring summary 0 (min 180 (length summary))))))
+    (magpt--history-append-entry
+     'ask-git (or magpt--current-request "") (or resp "")
+     "Free-form answer or JSON {answer, suggestions[], notes}"
+     :summary (or sum-short ""))))
+
+;;;###autoload
+(defun magpt-ask-git ()
+  "Ask an arbitrary question about the current Git repository."
+  (interactive)
+  (magpt--ensure-assist-ready)
+  (let ((q (read-string (magpt--i18n 'ai-ask-prompt))))
+    (when (and (stringp q) (> (length (string-trim q)) 0))
+      (magpt-run-task 'ask-git (list :question q)))))
 
 (provide 'magpt-tasks-assist)
 

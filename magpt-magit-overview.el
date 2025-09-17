@@ -54,6 +54,10 @@ Uses Magit's save/restore helpers when available."
   "Face for console-like command examples in Magpt overview."
   :group 'magpt)
 
+(defface magpt-ask-icon-face
+  '((t :foreground "red" :weight bold))
+  "Face for Ask Git icon (red question mark)."
+  :group 'magpt)
 ;; Forward declarations from magpt.el (to silence byte-compiler).
 (declare-function magpt--history-last-entry-for "magpt-history" (task))
 (declare-function magpt--entry-parse-json-safe "magpt-history" (entry))
@@ -487,7 +491,10 @@ Card shows summary and first command; falls back to raw response."
   "Insert Ask Git 'Answer' card for entry AG."
   (when ag
     (magit-insert-section (magit-section 'magpt-ai-card-ask-git)
-      (let ((ic (and (fboundp 'magpt--icon) (magpt--icon 'ask-question))))
+      (let* ((raw-ic (and (fboundp 'magpt--icon) (magpt--icon 'ask-question)))
+             (ic (if (and raw-ic (stringp raw-ic) (> (length raw-ic) 0))
+                     raw-ic
+                   (propertize "❓" 'face 'magpt-ask-icon-face))))
         (magit-insert-heading
           (concat (if (and ic (> (length ic) 0)) (concat ic " ") "")
                   (magpt--i18n 'overview-card-ask-git))))

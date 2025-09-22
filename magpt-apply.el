@@ -127,7 +127,7 @@
 (defun magpt-open-response-json (&optional entry)
   "Open ENTRY's response in a JSON buffer and pretty-print when valid."
   (interactive)
-  (let* ((e (or entry (magpt--entry-at-point) (car (last magpt--history-entries)))))
+  (let* ((e (or entry (magpt--entry-at-point) (magpt--history-last-any))))
     (unless e (user-error "No history entry available"))
     (let* ((resp (plist-get e :response))
            (buf (get-buffer-create "*magpt-json*")))

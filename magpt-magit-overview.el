@@ -126,8 +126,9 @@ a short backtrace snippet to help find what triggers automatic expansion of sect
   (when (fboundp 'magit-section-toggle)
     (advice-add 'magit-section-toggle :after #'magpt--log-magit-section-show)))
 
-(defun magpt--refresh-magit-status-visible ()
+(defun magpt--refresh-magit-status-visible (&optional root)
   "Refresh visible Magit status buffers (if any) to update AI overview.
+When ROOT is non-nil, refresh only buffers for that Git root.
 Respect `magpt-magit-auto-refresh' — when nil do nothing.
 
 Schedule the actual refresh with `run-at-time' to avoid performing refreshes
@@ -140,16 +141,22 @@ history changes (no need for the user to press \"g\")."
                    (dolist (win (window-list))
                      (with-current-buffer (window-buffer win)
                        (when (derived-mode-p 'magit-status-mode)
-                         (let ((vis (and magpt-magit-preserve-visibility
-                                         (fboundp 'magit-save-section-visibility)
-                                         (condition-case _ (magit-save-section-visibility) (error nil)))))
-                           (ignore-errors
-                             (cond
-                              ((fboundp 'magit-refresh) (magit-refresh))
-                              ((fboundp 'magit-refresh-buffer) (magit-refresh-buffer))))
-                           (when (and vis magpt-magit-preserve-visibility
-                                      (fboundp 'magit-restore-section-visibility))
-                             (ignore-errors (magit-restore-section-visibility vis)))))))))))
+                         (let* ((buf-root (ignore-errors (magpt--project-root)))
+                                (match (or (null root)
+                                           (and buf-root
+                                                (string= (file-name-as-directory (expand-file-name buf-root))
+                                                         (file-name-as-directory (expand-file-name root))))))
+                                (vis (and magpt-magit-preserve-visibility
+                                          (fboundp 'magit-save-section-visibility)
+                                          (condition-case _ (magit-save-section-visibility) (error nil)))))
+                           (when match
+                             (ignore-errors
+                               (cond
+                                ((fboundp 'magit-refresh) (magit-refresh))
+                                ((fboundp 'magit-refresh-buffer) (magit-refresh-buffer))))
+                             (when (and vis magpt-magit-preserve-visibility
+                                        (fboundp 'magit-restore-section-visibility))
+                               (ignore-errors (magit-restore-section-visibility vis))))))))))))
 
 ;; Subscribe Magit overview refresh to history changes.
 (add-hook 'magpt-history-changed-hook #'magpt--refresh-magit-status-visible)
@@ -561,20 +568,28 @@ Card shows summary and first command; falls back to raw response."
             (magpt--insert-entry-buttons ag)))))))
 
 (defun magpt--ai-overview--insert-heading-only ()
-  "Insert overview heading; log current history size."
+  "Insert overview heading; log current history size and show repo badge."
   ;; Ensure a blank line above the overview heading for visual separation.
   (insert "\n")
   (let* ((ic (and (fboundp 'magpt--icon)
                   (let ((x (magpt--icon 'ai-overview)))
                     (if (and (stringp x) (> (length x) 0))
                         x
-                      (magpt--icon 'suggestion-default))))))
+                      (magpt--icon 'suggestion-default)))))
+         (root (ignore-errors (magpt--project-root)))
+         (repo (and (stringp root)
+                    (file-name-nondirectory (directory-file-name root))))
+         (badge (when repo
+                  (propertize (format " [repo: %s]" repo) 'face 'magpt-badge-info-face))))
     (magit-insert-heading
       (concat (if (and ic (> (length ic) 0)) (concat ic " ") "")
-              (magpt--i18n 'overview-title))))
+              (magpt--i18n 'overview-title)
+              (or badge ""))))
   (when (fboundp 'magpt--log)
-    (magpt--log "overview: insert begin; entries=%d"
-                (length (or (and (boundp 'magpt--history-entries) magpt--history-entries) '())))))
+    (let* ((root (ignore-errors (magpt--project-root)))
+           (cnt (ignore-errors
+                  (length (and root (magpt--history-entries-for-root root))))))
+      (magpt--log "overview: insert begin; root=%s entries=%s" root (or cnt 0)))))
 
 (defun magpt--ai-overview--collect-entries ()
   "Collect latest entries for all cards used by the overview."

@@ -49,11 +49,8 @@
         nil)))
 
 (defun magpt-overview-extras--last-entry (task)
-  "Return newest history entry plist for TASK from `magpt--history-entries'."
-  (when (boundp 'magpt--history-entries)
-    (cl-find task magpt--history-entries
-             :key (lambda (e) (plist-get e :task))
-             :test #'eq)))
+  "Return newest history entry plist for TASK for the current repository."
+  (magpt--history-last-entry-for task))
 
 (defun magpt-overview-extras--task-title (task)
   "Return localized title for TASK using magpt i18n keys (with emoji prefix when enabled)."

@@ -1286,20 +1286,25 @@ Uses `magpt-commit-language' for suggestion.message and `magpt-info-language' fo
                 (format "--- RECENT GIT OUTPUT ---\n%s\n--- END RECENT GIT OUTPUT ---\n" recent)
               ""))))
 
-(defun magpt--render-ask-git (resp _data)
+(defun magpt--render-ask-git (resp data)
   "Append Ask Git answer RESP to history with a short summary."
-  (let* ((obj (ignore-errors (json-parse-string (or resp "") :object-type 'alist :array-type 'list)))
+  (let* ((saved (if (fboundp 'magpt--sanitize-response)
+                    (magpt--sanitize-response (or resp ""))
+                  (or resp "")))
+         (obj (ignore-errors (json-parse-string saved :object-type 'alist :array-type 'list)))
          (ans (and obj (alist-get 'answer obj)))
          (summary (cond
                    ((and (stringp ans) (> (length ans) 0)) ans)
                    ((and obj (alist-get 'summary obj)) (alist-get 'summary obj))
                    (t nil)))
          (sum-short (and (stringp summary)
-                         (substring summary 0 (min 180 (length summary))))))
+                         (substring summary 0 (min 180 (length summary)))))
+         (q (and (listp data) (plist-get data :question))))
     (magpt--history-append-entry
-     'ask-git (or magpt--current-request "") (or resp "")
+     'ask-git (or magpt--current-request "") saved
      "Free-form answer or JSON {answer, suggestions[], notes}"
-     :summary (or sum-short ""))))
+     :summary (or sum-short "")
+     :question (or q ""))))
 
 ;;;###autoload
 (defun magpt-ask-git ()

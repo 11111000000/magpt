@@ -110,7 +110,7 @@ Note: This does not translate Emacs UI; it only nudges the model via prompts."
   :type 'string
   :group 'magpt)
 
-(defcustom magpt-commit-language nil
+(defcustom magpt-commit-language "English"
   "Preferred language for generated commit messages. If nil, no preference."
   :type '(choice (const :tag "No preference" nil)
                  (string :tag "Language"))
@@ -120,9 +120,9 @@ Note: This does not translate Emacs UI; it only nudges the model via prompts."
   "You are an assistant that writes high-quality Git commit messages.
 Requirements:
 - Use Conventional Commits types when applicable (feat, fix, docs, refactor, test, chore, perf, build, ci).
-- First line: concise summary <= 72 chars.
+- Subject (first line, <= 72 chars): state what was done (past/result form), not what to do; avoid infinitive/imperative. Prefer one high‑level, generalized summary when many files or heterogeneous changes are present; do not enumerate individual edits.
 - Optional body: wrap at ~72 chars per line; explain motivation, context, and impact.
-- Use imperative mood; do not include ticket/issue references unless present in diff.
+- Do not include ticket/issue references unless present in the diff or existing message.
 - If the diff is empty or unclear, say 'chore: update' with a brief rationale.
 Provide the final commit message only, no extra commentary."
   "Prompt template for commit message generation. The diff is appended."

@@ -3,7 +3,7 @@
 :DESCRIPTION: Provider‑agnostic, safety‑first assistant for Git in Emacs, integrating with Magit and gptel. It helps you learn and practice plain Git well—generates commit messages, explains repo state, recommends safe next steps, and records results for review. Always preview‑first, reversible, and under your control.
 :END:
 
-MaGPT does not try to think for you, replace your judgment, or automate your workflow behind your back. It is designed as a quiet helper and teacher:
+   MaGPT does not try to think for you, replace your judgment, or automate your workflow behind your back. It is designed as a quiet helper and teacher:
 - If you’re learning Git, it shows real Git commands and Magit keys in your current context, so you understand “what” and “why” right when you need it—without doing anything irreversible.
 - If you’re experienced, it offers timely, unobtrusive guidance that reduces friction and helps you avoid mistakes in tricky states—while keeping your hands on the wheel.
 

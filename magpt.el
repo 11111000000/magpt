@@ -258,9 +258,10 @@ This gates any mutation-producing Apply actions; Phase 2 enables only naturally 
                                   (or alist '())))))))))
 
 (defun magpt--maybe-load-project-rc ()
-  "Load and apply project .magptrc if present and changed."
+  "Load and apply project .magptrc if present and changed. Clear cached state when absent."
   (let ((f (magpt--locate-project-rc)))
-    (when f
+    (if (not f)
+        (setq magpt--proj-rc-state nil)
       (let* ((attr (file-attributes f))
              (mtime (when attr (file-attribute-modification-time attr))))
         (when (or (null magpt--proj-rc-state)
@@ -285,9 +286,12 @@ user RC changed since the last call."
   (magpt--maybe-load-user-rc)
   ;; Then load project-level, which takes precedence.
   (magpt--maybe-load-project-rc)
-  ;; Re-apply project RC data (if available) to enforce precedence consistently.
-  (when (and magpt--proj-rc-state (plist-get magpt--proj-rc-state :data))
-    (magpt--apply-rc (plist-get magpt--proj-rc-state :data))))
+  ;; Re-apply project RC data (only if it belongs to the CURRENT project) to enforce precedence consistently.
+  (let ((curr (magpt--locate-project-rc)))
+    (when (and magpt--proj-rc-state
+               (plist-get magpt--proj-rc-state :data)
+               (equal (plist-get magpt--proj-rc-state :path) curr))
+      (magpt--apply-rc (plist-get magpt--proj-rc-state :data)))))
 
 ;;;; Section: Logging and diagnostics
 ;;
